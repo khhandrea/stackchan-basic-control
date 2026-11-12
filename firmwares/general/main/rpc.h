@@ -42,6 +42,21 @@ const std::vector<Method>& methods();
 void handleLine(const char* line);
 void sendError(const cJSON* id, int code, const char* message);
 
+// Param helpers. On failure they fill err (kInvalidParams) and return false.
+// Optional variants leave out unchanged when the field is absent.
+bool getInt(const cJSON* params, const char* name, int min, int max, int* out, Error* err);
+bool getOptInt(const cJSON* params, const char* name, int min, int max, int* out, Error* err);
+bool getNumber(const cJSON* params, const char* name, double min, double max, double* out, Error* err);
+bool getOptNumber(const cJSON* params, const char* name, double min, double max, double* out, Error* err);
+bool getBool(const cJSON* params, const char* name, bool* out, Error* err);
+bool getOptBool(const cJSON* params, const char* name, bool* out, Error* err);
+// Returns the string or nullptr (err filled) if missing / not a string.
+const char* getString(const cJSON* params, const char* name, Error* err);
+const char* getOptString(const cJSON* params, const char* name, Error* err, bool* ok);
+
+// Sets err and returns nullptr, for one-line handler exits.
+cJSON* fail(Error* err, int code, const char* message);
+
 // Reads request lines forever.
 void serve();
 

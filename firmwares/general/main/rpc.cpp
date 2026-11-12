@@ -1,5 +1,6 @@
 #include "rpc.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "link.h"
@@ -89,6 +90,113 @@ void handleLine(const char* line) {
     }
 
     cJSON_Delete(req);
+}
+
+cJSON* fail(Error* err, int code, const char* message) {
+    err->code = code;
+    err->message = message;
+    return nullptr;
+}
+
+namespace {
+
+// Messages must outlive the handler; built into a static buffer (handlers run on one task).
+char param_message[96];
+
+bool paramError(Error* err, const char* name, const char* what) {
+    snprintf(param_message, sizeof(param_message), "%s: %s", name, what);
+    fail(err, kInvalidParams, param_message);
+    return false;
+}
+
+const cJSON* item(const cJSON* params, const char* name) {
+    return params != nullptr ? cJSON_GetObjectItemCaseSensitive(params, name) : nullptr;
+}
+
+}  // namespace
+
+bool getOptNumber(const cJSON* params, const char* name, double min, double max, double* out, Error* err) {
+    const cJSON* it = item(params, name);
+    if (it == nullptr) {
+        return true;
+    }
+    if (!cJSON_IsNumber(it)) {
+        return paramError(err, name, "must be a number");
+    }
+    if (it->valuedouble < min || it->valuedouble > max) {
+        snprintf(param_message, sizeof(param_message), "%s out of range %g-%g", name, min, max);
+        fail(err, kInvalidParams, param_message);
+        return false;
+    }
+    *out = it->valuedouble;
+    return true;
+}
+
+bool getNumber(const cJSON* params, const char* name, double min, double max, double* out, Error* err) {
+    if (item(params, name) == nullptr) {
+        return paramError(err, name, "missing");
+    }
+    return getOptNumber(params, name, min, max, out, err);
+}
+
+bool getOptInt(const cJSON* params, const char* name, int min, int max, int* out, Error* err) {
+    double value = *out;
+    if (!getOptNumber(params, name, min, max, &value, err)) {
+        return false;
+    }
+    if (value != static_cast<int>(value)) {
+        return paramError(err, name, "must be an integer");
+    }
+    *out = static_cast<int>(value);
+    return true;
+}
+
+bool getInt(const cJSON* params, const char* name, int min, int max, int* out, Error* err) {
+    if (item(params, name) == nullptr) {
+        return paramError(err, name, "missing");
+    }
+    return getOptInt(params, name, min, max, out, err);
+}
+
+bool getOptBool(const cJSON* params, const char* name, bool* out, Error* err) {
+    const cJSON* it = item(params, name);
+    if (it == nullptr) {
+        return true;
+    }
+    if (!cJSON_IsBool(it)) {
+        return paramError(err, name, "must be a boolean");
+    }
+    *out = cJSON_IsTrue(it);
+    return true;
+}
+
+bool getBool(const cJSON* params, const char* name, bool* out, Error* err) {
+    if (item(params, name) == nullptr) {
+        return paramError(err, name, "missing");
+    }
+    return getOptBool(params, name, out, err);
+}
+
+const char* getOptString(const cJSON* params, const char* name, Error* err, bool* ok) {
+    const cJSON* it = item(params, name);
+    *ok = true;
+    if (it == nullptr) {
+        return nullptr;
+    }
+    if (!cJSON_IsString(it)) {
+        *ok = paramError(err, name, "must be a string");
+        return nullptr;
+    }
+    return it->valuestring;
+}
+
+const char* getString(const cJSON* params, const char* name, Error* err) {
+    bool ok;
+    const char* s = getOptString(params, name, err, &ok);
+    if (ok && s == nullptr) {
+        paramError(err, name, "missing");
+    }
+    return s;
 }
 
 void serve() {
