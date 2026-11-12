@@ -13,6 +13,7 @@
 #include "power.h"
 #include "rpc.h"
 #include "streams.h"
+#include "touch.h"
 
 static const char* TAG = "main";
 
@@ -25,6 +26,7 @@ extern "C" void app_main() {
     power::init();
     board::init();
     display::init();
+    touch::init();
 
     // Methods
     sys::registerMethods();
@@ -32,11 +34,13 @@ extern "C" void app_main() {
     streams::registerMethods();
     power::registerMethods();
     display::registerMethods();
+    touch::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
     streams::start();
     power::start();
+    touch::start();
     poller::start();
     display::start();
 
