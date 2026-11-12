@@ -190,15 +190,18 @@ Event details:
 
 ### Servos
 
-**Not implemented yet** (servo methods, `servo` stream and `servo.fault` are planned).
+Servos stay as they are at boot; call `servo.power` with `on: true` before moving. Angles use the zero positions calibrated by the official firmware (NVS `servo`).
 
 | Method | Params | Result |
 |---|---|---|
-| `servo.get` | — | Per servo (`yaw`, `pitch`): `angle`, `target`, `temp_c`, `volt_mv`, `load`, `powered` |
-| `servo.move` | `yaw` (-128–128 °, -128 = left), `pitch` (5–85 °, 85 = up), optional `speed` (°/s) or `spring` (`stiffness`, `damping`) | `{}` |
-| `servo.rotate` | `velocity` (-1000–1000, unitless, 0 = stop); switches yaw to wheel mode, next `servo.move` / `servo.home` returns to position mode | `{}` |
-| `servo.home` | — | `{}` |
-| `servo.power` | `on` (true = hold, false = free) | `{}` |
+| `servo.get` | — | Per servo (`yaw`, `pitch`): `angle` (`null` when unpowered), `target`, `temp_c`, `volt_mv`, `load` (−1023–1023), `torque`, `powered` |
+| `servo.move` | `yaw` (-128–128 °, -128 = left) and/or `pitch` (5–85 °, 85 = up), optional `speed` (1–360 °/s, default 60) | `{}`; `-32002` if servo power is off |
+| `servo.rotate` | `velocity` (-1000–1000) | **Not implemented**: `-32001` (wheel mode rewrites the servo's EEPROM angle limits) |
+| `servo.home` | — | `{}`: yaw 0°, pitch 5° at 60 °/s |
+| `servo.power` | `on` (true = VM_EN on, hold the present position; false = torque off and VM_EN off) | `{}` |
+
+- `spring` motion parameters are not implemented; moves are linear at `speed`
+- Protection (checked every 100 ms with torque on): temperature ≥ 65 °C → `overheat`, |load| ≥ 700 for 0.5 s → `overload`, > 5° from a reached target for 1 s → `stall`, no reply → `bus_error`; each cuts torque and servo power and sends `servo.fault`
 
 ### LEDs
 

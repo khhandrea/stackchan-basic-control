@@ -18,6 +18,7 @@
 #include "power.h"
 #include "rpc.h"
 #include "rtc.h"
+#include "servo.h"
 #include "streams.h"
 #include "touch.h"
 
@@ -39,6 +40,7 @@ extern "C" void app_main() {
     led::init();
     audio::init();
     camera::init();
+    servo::init();
 
     // Methods
     sys::registerMethods();
@@ -53,6 +55,7 @@ extern "C" void app_main() {
     led::registerMethods();
     audio::registerMethods();
     camera::registerMethods();
+    servo::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
@@ -63,6 +66,7 @@ extern "C" void app_main() {
     light::start();
     led::start();
     audio::start();
+    servo::start();
     poller::start();
     display::start();
 

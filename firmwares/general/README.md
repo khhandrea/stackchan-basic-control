@@ -156,7 +156,8 @@ tools/dev.sh                   # build (log in build/build.log) and flash throug
 | Display: face, decorators, modal (ASCII + Hangul), brightness, power | Implemented, tested via `display.capture` |
 | Touch, IMU / motion, light / proximity, RTC | Implemented, tested by reads |
 | LEDs, audio, camera | Implemented, tested by reads and register checks |
-| **Servos** (`servo.*`, `servo` stream, `servo.fault`) | **Not implemented** |
+| Servos: `servo.get` / `move` / `home` / `power`, `servo` stream, `servo.fault` | Implemented, tested with ±5° and ±20° moves and home (watched) |
+| `servo.rotate` (wheel mode), spring motion | Not implemented |
 
 ### Physical Checklist
 

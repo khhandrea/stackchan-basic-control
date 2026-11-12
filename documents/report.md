@@ -66,6 +66,20 @@ Scan (`i2c.scan`): `0x21 0x23 0x34 0x36 0x38 0x40 0x41 0x50 0x51 0x58 0x68 0x69 
 | Microphone level (quiet room) | RMS ~20 (−64 dBFS) at 30 dB gain |
 | RTC | running, valid; held UTC |
 
+## Servos
+
+| Item | Yaw (ID 1) | Pitch (ID 2) |
+|---|---|---|
+| Calibrated zero (NVS `servo`, official firmware) | raw 476 | raw 596 |
+| Default zero (official firmware) | raw 460 | raw 620 |
+| Pose found after the factory firmware | 17.2° | 43.8° |
+| Supply voltage | 5.1 V | 5.2 V |
+| Temperature (idle → after tests) | 26 → 28 °C | 27 → 29 °C |
+| Steady-state error after moves | ≤ 1.6° (load ±75–90) | ≤ 1° |
+
+- VM_EN (PY32 pin 0) was left on by the factory firmware
+- With servo power off the servos do not answer on the bus
+
 Light sensor and camera have to be re-checked in a lit room (see the firmware README checklist).
 
 ## Firmware
