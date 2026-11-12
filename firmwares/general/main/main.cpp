@@ -1,6 +1,7 @@
 // StackChan general firmware: standalone StackChan controlled from a host over USB serial.
 
 #include "esp_log.h"
+#include "audio.h"
 #include "board.h"
 #include "display.h"
 #include "events.h"
@@ -35,6 +36,7 @@ extern "C" void app_main() {
     light::init();
     rtc::init();
     led::init();
+    audio::init();
 
     // Methods
     sys::registerMethods();
@@ -47,6 +49,7 @@ extern "C" void app_main() {
     light::registerMethods();
     rtc::registerMethods();
     led::registerMethods();
+    audio::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
@@ -56,6 +59,7 @@ extern "C" void app_main() {
     imu::start();
     light::start();
     led::start();
+    audio::start();
     poller::start();
     display::start();
 
