@@ -6,6 +6,7 @@
 #include "events.h"
 #include "i2c_bus.h"
 #include "imu.h"
+#include "led.h"
 #include "light.h"
 #include "link.h"
 #include "methods.h"
@@ -33,6 +34,7 @@ extern "C" void app_main() {
     imu::init();
     light::init();
     rtc::init();
+    led::init();
 
     // Methods
     sys::registerMethods();
@@ -44,6 +46,7 @@ extern "C" void app_main() {
     imu::registerMethods();
     light::registerMethods();
     rtc::registerMethods();
+    led::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
@@ -52,6 +55,7 @@ extern "C" void app_main() {
     touch::start();
     imu::start();
     light::start();
+    led::start();
     poller::start();
     display::start();
 
