@@ -1,6 +1,8 @@
 // StackChan general firmware: standalone StackChan controlled from a host over USB serial.
 
 #include "esp_log.h"
+#include "board.h"
+#include "display.h"
 #include "events.h"
 #include "i2c_bus.h"
 #include "link.h"
@@ -21,18 +23,22 @@ extern "C" void app_main() {
     // Hardware
     i2c::init();
     power::init();
+    board::init();
+    display::init();
 
     // Methods
     sys::registerMethods();
     events::registerMethods();
     streams::registerMethods();
     power::registerMethods();
+    display::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
     streams::start();
     power::start();
     poller::start();
+    display::start();
 
     sys::sendBootEvent();
     ESP_LOGI(TAG, "ready");

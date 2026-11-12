@@ -16,7 +16,7 @@ enum class ReadResult { Line, TooLong };
 ReadResult readLine(char* buf, size_t cap);
 
 // Sends one line (a '\n' is appended). Thread-safe; lines are never interleaved.
-// Dropped if no host is connected. Must not call ESP_LOG (log output is routed here).
+// Without a host, lines are queued until the TX buffer is full, then dropped. Must not call ESP_LOG (log output is routed here).
 void send(const char* line, size_t len);
 
 // Waits until queued output has been sent (used before reboot).

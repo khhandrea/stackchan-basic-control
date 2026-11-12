@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build
 if ! bash -ic 'get_idf >/dev/null 2>&1 && idf.py build' > build/build.log 2>&1; then
-    grep -E "error|FAILED" build/build.log | head -30 >&2
+    grep -E "error:|FAILED:" build/build.log | cut -c1-300 | head -20 >&2
     echo "build failed (build/build.log)" >&2
     exit 1
 fi

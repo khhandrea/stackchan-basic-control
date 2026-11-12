@@ -1,4 +1,4 @@
-"""Command-line tool: ``stackchan ping``, ``stackchan call <method> [params]``, ``stackchan listen``."""
+"""Command-line tool: ``stackchan ping``, ``stackchan call <method> [params]``, ``stackchan listen``, ``stackchan capture``."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 import time
 
 from .client import DEFAULT_PORT, StackChanClient, RpcError
+from .image import rgb565be_to_png
 
 
 def _print_json(value: object) -> None:
@@ -42,6 +43,14 @@ def cmd_listen(client: StackChanClient, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_capture(client: StackChanClient, args: argparse.Namespace) -> int:
+    frame = client.call("display.capture", timeout=10)
+    with open(args.output, "wb") as f:
+        f.write(rgb565be_to_png(frame["data"], frame["width"], frame["height"]))
+    print(args.output)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="stackchan", description=__doc__)
     parser.add_argument("--port", default=os.environ.get("STACKCHAN_PORT", DEFAULT_PORT))
@@ -60,6 +69,10 @@ def main() -> int:
     p = sub.add_parser("listen", help="print notifications (events, streams, logs, raw lines)")
     p.add_argument("-s", "--seconds", type=float, help="stop after this many seconds")
     p.set_defaults(func=cmd_listen)
+
+    p = sub.add_parser("capture", help="save the current screen as PNG (display.capture)")
+    p.add_argument("output")
+    p.set_defaults(func=cmd_capture)
 
     args = parser.parse_args()
     try:

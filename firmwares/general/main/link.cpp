@@ -12,13 +12,19 @@ namespace {
 
 constexpr uint32_t kTxBufferSize = 4096;
 constexpr uint32_t kRxBufferSize = 1024;
+constexpr size_t kWriteChunk = 1024;
 constexpr TickType_t kWriteTimeout = pdMS_TO_TICKS(50);
 
 SemaphoreHandle_t tx_mutex = nullptr;
 
+// Without a host (e.g. right after reset, before USB is detected) data is only queued
+// into the TX ring buffer without waiting, so early boot logs are kept but never block.
 void writeAll(const char* data, size_t len) {
+    TickType_t timeout = usb_serial_jtag_is_connected() ? kWriteTimeout : 0;
     while (len > 0) {
-        int n = usb_serial_jtag_write_bytes(data, len, kWriteTimeout);
+        // The driver rejects a write larger than its TX ring buffer, so send in chunks.
+        size_t chunk = len < kWriteChunk ? len : kWriteChunk;
+        int n = usb_serial_jtag_write_bytes(data, chunk, timeout);
         if (n <= 0) {
             return;  // host stopped reading; drop the rest
         }
@@ -70,7 +76,7 @@ ReadResult readLine(char* buf, size_t cap) {
 }
 
 void send(const char* line, size_t len) {
-    if (tx_mutex == nullptr || !usb_serial_jtag_is_connected()) {
+    if (tx_mutex == nullptr) {
         return;
     }
     xSemaphoreTake(tx_mutex, portMAX_DELAY);
