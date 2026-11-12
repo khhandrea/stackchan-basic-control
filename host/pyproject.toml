@@ -1,0 +1,13 @@
+[project]
+name = "stackchan-host"
+version = "0.1.0"
+description = "Host client for the StackChan general firmware (JSON-RPC over USB serial)"
+requires-python = ">=3.12"
+dependencies = ["pyserial>=3.5"]
+
+[project.scripts]
+stackchan = "stackchan_host.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
