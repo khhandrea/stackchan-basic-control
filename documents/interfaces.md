@@ -31,6 +31,11 @@ Body:
 | IO expander | PY32L020 | 0x6F (ADD_SEL = H: 0x71) |
 
 - PY32L020 drives the RGB LEDs (WS2812C ×12) and servo power enable (VM_EN); the MCU does not drive them directly
+  - Pin 0: VM_EN (servo power, output, high = on); pin 13: RGB data (output, push-pull)
+  - LEDs: index 0–5 left, 6–11 right; colors as RGB565 in registers 0x30+ (2 bytes each, little-endian), count and refresh in 0x24
+- INA226 measures the battery with a 10 mΩ shunt (StackChan-BSP): 2.5 µV/LSB shunt register → 0.25 mA/LSB
+- Camera GC0308 has its own 20 MHz crystal: no XCLK pin; SCCB shares the internal I2C bus
+- AW9523B: P0.2 = AW88298 reset, P1.1 = LCD reset (official firmware); FT6336 version selects the LCD init (ILI9342C/E)
 
 ### SPI (SCK = G36, MOSI = G37)
 
@@ -45,8 +50,11 @@ Body:
 
 | Device | Data pin | Control |
 |---|---|---|
-| Microphone (ES7210) | DIN = G13 | Internal I2C |
-| Speaker (AW88298) | DOUT = G14 | Internal I2C |
+| Microphone (ES7210) | DIN = G14 | Internal I2C |
+| Speaker (AW88298) | DOUT = G13 | Internal I2C |
+
+- Verified in the official firmware (`AUDIO_I2S_GPIO_DIN = 14`, `DOUT = 13`) and on the device
+- I2S0: speaker in standard stereo mode, microphones in TDM mode (4 slots), 24 kHz, shared clocks
 
 ### Camera DVP (GC0308)
 
@@ -80,8 +88,8 @@ Body:
 | G8 / G9 | PORT.B (GPIO / ADC) |
 | G10 | IR receiver |
 | G11 / G12 | Internal I2C SCL / SDA |
-| G13 | I2S DIN (microphone) |
-| G14 | I2S DOUT (speaker) |
+| G13 | I2S DOUT (speaker) |
+| G14 | I2S DIN (microphone) |
 | G15, G16, G39–G42, G47, G48 | Camera D0–D7 |
 | G17 / G18 | PORT.C TX / RX (UART) |
 | G33 / G34 | I2S WS / BCK |

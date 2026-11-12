@@ -48,6 +48,7 @@ Measured values from the actual device are in [report.md](report.md).
 | RGB LED ×12 | WS2812C |
 
 - PY32L020 handles servo power enable (VM_EN) and RGB LED driving
+- INA226 battery current shunt: 10 mΩ
 - Battery: 550 mAh, 3.7 V
 - USB-C: use the body base port (power + data)
 - Size / weight: 54.0 × 70.5 × 61.5 mm / 187.2 g

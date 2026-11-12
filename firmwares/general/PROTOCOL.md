@@ -10,7 +10,8 @@ Message format between the host (Raspberry Pi 3) and the device over USB serial.
 | Encoding | UTF-8 |
 | Frame | One JSON object per line, terminated by `\n` |
 | Max request line | 1024 bytes |
-| Non-JSON lines | Lines not starting with `{` are raw console output (ROM boot text) and are not part of the protocol |
+| Non-JSON lines | Lines not starting with `{` are raw console output (ROM / bootloader text, panics, driver messages printed from interrupts) and are not part of the protocol |
+| Max response line | No fixed limit (a VGA `display.capture` is ~205 KB) |
 
 ## Message Types
 
@@ -123,6 +124,17 @@ Human-readable debug text, including firmware logs and the periodic power log.
 
 Subscription groups: `touch` (both touch events), `power` (all `power.*`), and each remaining event name.
 
+Event details:
+
+| Event | Behavior |
+|---|---|
+| `touch.screen` | `tap` when released before 600 ms, `long_press` once at 600 ms; coordinates are where the touch started. A tap on a visible modal goes to its buttons and produces no `touch.screen` event |
+| `touch.head` | `start` / `end` per zone; `tap` if released within 500 ms; `long_press` once at 1 s |
+| `motion` | Relative to the "up" direction measured at boot: `tilted` > 25° for 0.3 s, `fallen` > 60° for 1 s (re-armed when upright), `shaken` 4 jolts > 0.7 g within 0.8 s, `lifted` upward acceleration > 0.12 g for 60 ms while upright (heuristics) |
+| `proximity` | `near` at raw ≥ 400, `far` below 250 (hysteresis) |
+| `power.low_battery` | Once when on battery and `batt_pct` ≤ 10; re-armed at ≥ 15 % or on USB |
+| `button` | AXP2101 power key short press (a long press of ~4 s powers the device off in hardware) |
+
 ## Methods
 
 ### System
@@ -131,7 +143,7 @@ Subscription groups: `touch` (both touch events), `power` (all `power.*`), and e
 |---|---|---|
 | `sys.ping` | — | `{"pong":true}` |
 | `sys.info` | — | `fw_version`, `build_date`, `mac` |
-| `sys.status` | — | `uptime_ms`, `batt_pct`, `batt_mv`, `batt_ma`, `charging`, `vbus`, `chip_temp_c`, `free_heap` |
+| `sys.status` | — | `uptime_ms`, `batt_pct`, `batt_mv`, `batt_ma`, `charging`, `charge_state`, `vbus`, `vbus_mv`, `chip_temp_c`, `pmic_temp_c`, `free_heap` |
 | `sys.subscribe` | `events`: list of names or groups | Current subscription list |
 | `sys.unsubscribe` | `events`: list of names or groups | Current subscription list |
 | `sys.reboot` | — | `{}` (sent before rebooting) |
@@ -142,7 +154,7 @@ Subscription groups: `touch` (both touch events), `power` (all `power.*`), and e
 
 | Method | Params | Result |
 |---|---|---|
-| `stream.start` | `name` (`status` / `imu` / `light` / `servo` / `audio`), `rate_hz` (1–100) | `{}` |
+| `stream.start` | `name` (`status` / `imu` / `light` / `servo` / `audio`), `rate_hz` (1–100) | `{}`; `-32001` if the source is not available |
 | `stream.stop` | `name` | `{}` |
 | `log.set_level` | `level` (`E` / `W` / `I` / `D` / `V` / `none`) | `{}` |
 | `log.set_power_interval` | `interval_s` (0 = off) | `{}` |
@@ -151,12 +163,15 @@ Subscription groups: `touch` (both touch events), `power` (all `power.*`), and e
 
 | Method | Params | Result |
 |---|---|---|
-| `touch.get` | — | `head` (`front`, `middle`, `back` booleans), `screen` (`pressed`, `x`, `y`), `count`, `last_ms` |
+| `touch.get` | — | `head` (`front`, `middle`, `back` booleans, `level`: 3 × 0–3), `screen` (`pressed`, `x`, `y`), `count`, `last_ms` |
 | `button.get` | — | `pressed`, `count`, `last_ms` |
-| `imu.get` | — | `ax`, `ay`, `az` (g), `gx`, `gy`, `gz` (°/s), `mx`, `my`, `mz` (µT), `tilt_deg`, `motion` |
-| `light.get` | — | `lux`, `proximity` |
-| `time.get` | — | `iso` (RTC time, `YYYY-MM-DDTHH:MM:SS`) |
-| `time.set` | `iso` | `{}` |
+| `imu.get` | — | `ax`, `ay`, `az` (g), `gx`, `gy`, `gz` (°/s), `mx`, `my`, `mz` (µT, uncompensated, approximate), `tilt_deg`, `motion` (`still` / `moving` / `tilted` / `fallen`) |
+| `light.get` | — | `lux`, `proximity` (raw 0–2047), `near` |
+| `time.get` | — | `iso` (RTC time, `YYYY-MM-DDTHH:MM:SS`), `valid` (false after RTC power loss) |
+| `time.set` | `iso` (2000–2099) | `{}`; also sets the system clock |
+
+- `batt_ma`: INA226 battery current, `null` if the INA226 is missing; positive = into the battery (sign to be verified on battery power)
+- RTC time zone: store UTC
 
 ### Display
 
@@ -168,12 +183,14 @@ Subscription groups: `touch` (both touch events), `power` (all `power.*`), and e
 | `face.set_decorator` | `name` (`heart` / `angry` / `sweat` / `dizzy` / `shy`), `on` | `{}` |
 | `face.set_auto` | Any of `blink`, `breath` (bool) | `{}` |
 | `modal.get` | — | Current modal or `null` |
-| `modal.show` | `title`, `body`, `buttons` (`none` / `ok` / `yes_no`), `timeout_ms` (0 = persistent) | `{}` |
-| `modal.close` | — | `{}` |
+| `modal.show` | `title`, `body` (at least one; UTF-8, ASCII and Hangul), `buttons` (`none` / `ok` / `yes_no`), `timeout_ms` (0 = persistent) | `{}`; replaces a visible modal without a result event |
+| `modal.close` | — | `{}` (no result event) |
 | `display.set_brightness` | `value` (0–255) | `{}` |
 | `display.power` | `on` | `{}` |
 
 ### Servos
+
+**Not implemented yet** (servo methods, `servo` stream and `servo.fault` are planned).
 
 | Method | Params | Result |
 |---|---|---|
@@ -189,7 +206,7 @@ Output per channel = `color` × `brightness` / 100, then clamped to 168 (safe li
 
 | Method | Params | Result |
 |---|---|---|
-| `led.get` | — | `colors`: 12 × `[r, g, b]` |
+| `led.get` | — | `colors`: 12 × `[r, g, b]` (0–5 left, 6–11 right), `brightness` |
 | `led.set_all` | `color` (`[r, g, b]`) | `{}` |
 | `led.set_side` | `side` (`left` / `right`), `color`, `fade_ms` | `{}` |
 | `led.set_one` | `index` (0–11), `color` | `{}` |
@@ -199,13 +216,24 @@ Output per channel = `color` × `brightness` / 100, then clamped to 168 (safe li
 
 | Method | Params | Result |
 |---|---|---|
-| `audio.get` | — | `volume`, `level_rms` |
+| `audio.get` | — | `volume` (default 60), `level_rms` (microphone, 0–32767, smoothed), `level_dbfs` |
 | `audio.set_volume` | `value` (0–100) | `{}` |
-| `audio.beep` | `freq_hz`, `duration_ms` (≤ 1000) | `{}` |
+| `audio.beep` | `freq_hz` (20–12000), `duration_ms` (1–1000) | `{}` (queued, up to 4; `-32003` when full) |
 
 ### Camera
 
 | Method | Params | Result |
 |---|---|---|
-| `camera.snapshot` | — | `width`, `height`, `jpeg` (base64) |
-| `camera.set_resolution` | `size` (`qqvga` / `qvga` / `vga`) | `{}` |
+| `camera.snapshot` | — | `width`, `height`, `jpeg` (base64, quality 80); takes 0.2–0.8 s |
+| `camera.set_resolution` | `size` (`qqvga` / `qvga` / `vga`, default `qvga`) | `{}`; restarts the camera (~0.7 s) |
+
+### Debug
+
+Not part of the stable interface; for hardware bring-up.
+
+| Method | Params | Result |
+|---|---|---|
+| `display.capture` | — | `width`, `height`, `format` (`rgb565be`), `data` (base64 of the next rendered frame) |
+| `i2c.scan` | — | List of answering addresses on the internal bus |
+| `i2c.read` | `addr`, `reg`, optional `len` (1–32) | `data`: list of bytes |
+| `i2c.write` | `addr`, `reg`, `data` (1–32 bytes) | `{}` |

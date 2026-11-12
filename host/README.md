@@ -11,7 +11,14 @@ Python client for the StackChan general firmware ([PROTOCOL](../firmwares/genera
 ./pi.sh call sys.info              # call a method, print the result
 ./pi.sh call servo.move '{"yaw":30,"pitch":45}'
 ./pi.sh listen -s 10               # print notifications for 10 s (Ctrl-C to stop without -s)
+./pi.sh capture /home/hwanhee/screen.png   # rendered screen as PNG, saved on the Pi
 ```
+
+## Tests
+
+| Script | Purpose |
+|---|---|
+| `tests/capture_faces.py OUT_DIR` | Captures every expression, the decorators and a modal as PNG (run on the Pi) |
 
 ## Run on the Pi
 
