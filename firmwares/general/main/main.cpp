@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "audio.h"
 #include "board.h"
+#include "camera.h"
 #include "display.h"
 #include "events.h"
 #include "i2c_bus.h"
@@ -37,6 +38,7 @@ extern "C" void app_main() {
     rtc::init();
     led::init();
     audio::init();
+    camera::init();
 
     // Methods
     sys::registerMethods();
@@ -50,6 +52,7 @@ extern "C" void app_main() {
     rtc::registerMethods();
     led::registerMethods();
     audio::registerMethods();
+    camera::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
