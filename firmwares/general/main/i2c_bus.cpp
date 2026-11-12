@@ -1,5 +1,6 @@
 #include "i2c_bus.h"
 
+#include <cstdlib>
 #include <cstring>
 
 #include "esp_check.h"
@@ -58,13 +59,19 @@ esp_err_t Device::write(uint8_t reg, const uint8_t* data, size_t len) {
     if (dev_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
-    uint8_t buf[33];
-    if (len + 1 > sizeof(buf)) {
-        return ESP_ERR_INVALID_SIZE;
+    // Register byte and data in one buffer: on the stack for short writes, heap otherwise
+    uint8_t small[33];
+    uint8_t* buf = len + 1 <= sizeof(small) ? small : static_cast<uint8_t*>(malloc(len + 1));
+    if (buf == nullptr) {
+        return ESP_ERR_NO_MEM;
     }
     buf[0] = reg;
     memcpy(buf + 1, data, len);
-    return i2c_master_transmit(dev_, buf, len + 1, kTimeoutMs);
+    esp_err_t err = i2c_master_transmit(dev_, buf, len + 1, kTimeoutMs);
+    if (buf != small) {
+        free(buf);
+    }
+    return err;
 }
 
 esp_err_t Device::update8(uint8_t reg, uint8_t mask, uint8_t bits) {
