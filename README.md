@@ -1,4 +1,4 @@
-# StackChan
+# StackChan Basic Control
 
 Documentation and firmware for an M5Stack StackChan (SKU K151) controlled from a Raspberry Pi 3 over USB serial.
 

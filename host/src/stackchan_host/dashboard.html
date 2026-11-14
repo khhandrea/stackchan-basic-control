@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StackChan 대시보드</title>
+<title>StackChan Dashboard</title>
 <style>
   :root {
     --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #6b7385; --line: #e2e5eb;
@@ -88,233 +88,233 @@
 <body>
 <header>
   <h1>StackChan</h1>
-  <span><span id="conn-dot" class="dot"></span><span id="conn-text">연결 중…</span></span>
+  <span><span id="conn-dot" class="dot"></span><span id="conn-text">Connecting…</span></span>
 </header>
 
 <main>
 
 <!-- System -->
 <section>
-  <h2>시스템</h2>
+  <h2>System</h2>
   <table class="kv" id="info"></table>
   <div class="row">
-    <button onclick="resetDefaults()" title="얼굴·화면·모달·LED·볼륨·카메라·로그를 기본값으로 (서보는 제외)">기본값으로 초기화</button>
-    <button class="danger" id="btn-reboot">재부팅</button>
-    <button class="danger" id="btn-poweroff">전원 끄기</button>
+    <button onclick="resetDefaults()" title="Reset face, screen, modal, LEDs, volume, camera and logs to defaults (servos excluded)">Reset to defaults</button>
+    <button class="danger" id="btn-reboot">Reboot</button>
+    <button class="danger" id="btn-poweroff">Power off</button>
   </div>
-  <div class="row"><label class="chip" title="끄면 보관 모드: USB 연결 중 40% 아래에서만 충전하고 60%에서 멈춤">
-    <input type="checkbox" id="full-charge" onchange="call('power.set_charge_mode',{mode:this.checked?'full':'storage'})"> 완충 모드</label></div>
+  <div class="row"><label class="chip" title="Off = storage mode: on USB, charges only below 40% and stops at 60%">
+    <input type="checkbox" id="full-charge" onchange="call('power.set_charge_mode',{mode:this.checked?'full':'storage'})"> Full charge</label></div>
 </section>
 
 <!-- Connection -->
 <section>
-  <h2>연결<span class="sp"></span><button onclick="doPing()">ping</button></h2>
+  <h2>Connection<span class="sp"></span><button onclick="doPing()">ping</button></h2>
   <table class="kv" id="conn"></table>
 </section>
 
 <!-- Power -->
 <section>
-  <h2>전원 상태<span class="sp"></span><span data-rt="status" data-streams="status" data-hz="1" data-on="1"></span></h2>
+  <h2>Power<span class="sp"></span><span data-rt="status" data-streams="status" data-hz="1" data-on="1"></span></h2>
   <table class="kv" id="status"></table>
 </section>
 
 <!-- Idle -->
 <section>
-  <h2>절전</h2>
+  <h2>Idle</h2>
   <div class="chips" id="idle-levels">
-    <button data-level="0">level 0 기본</button>
+    <button data-level="0">level 0 active</button>
     <button data-level="1">level 1 sleepy</button>
-    <button data-level="2">level 2 어둡게</button>
-    <button data-level="3">level 3 절전</button>
+    <button data-level="2">level 2 dim</button>
+    <button data-level="3">level 3 power save</button>
   </div>
   <table class="kv" id="idle"></table>
 </section>
 
 <!-- Face -->
 <section>
-  <h2>얼굴</h2>
+  <h2>Face</h2>
   <div class="chips" id="expressions"></div>
-  <h3>파라미터</h3>
+  <h3>Parameters</h3>
   <div id="face-params"></div>
-  <h3>장식</h3>
+  <h3>Decorators</h3>
   <div class="chips" id="decorators"></div>
-  <h3>자동 움직임</h3>
+  <h3>Auto motion</h3>
   <div class="chips">
-    <label class="chip"><input type="checkbox" id="auto-on" checked onchange="call('face.set_auto',{on:this.checked})"> 켜기</label>
+    <label class="chip"><input type="checkbox" id="auto-on" checked onchange="call('face.set_auto',{on:this.checked})"> On</label>
   </div>
 </section>
 
 <!-- Display -->
 <section>
-  <h2>화면<span class="sp"></span><button onclick="capture()">캡처</button></h2>
+  <h2>Screen<span class="sp"></span><button onclick="capture()">Capture</button></h2>
   <canvas id="screen" width="320" height="240"></canvas>
-  <div class="row"><label>밝기</label><input type="range" id="bright" min="0" max="255" value="128"><span class="val" id="bright-v">128</span></div>
-  <div class="row"><label>화면</label>
-    <button onclick="call('display.power',{on:true})">켜기</button>
-    <button onclick="call('display.power',{on:false})">끄기</button></div>
+  <div class="row"><label>Brightness</label><input type="range" id="bright" min="0" max="255" value="128"><span class="val" id="bright-v">128</span></div>
+  <div class="row"><label>Screen</label>
+    <button onclick="call('display.power',{on:true})">On</button>
+    <button onclick="call('display.power',{on:false})">Off</button></div>
 </section>
 
 <!-- Modal -->
 <section>
-  <h2>모달 메시지<span class="sp"></span><button onclick="call('modal.get').then(r=>setText('modal-out', r))">읽기</button></h2>
-  <div class="row"><label>제목</label><input type="text" id="m-title" value="안녕하세요" style="flex:1"></div>
-  <div class="row"><label>본문</label><textarea id="m-body" rows="2">StackChan 대시보드에서 보낸 메시지입니다.</textarea></div>
-  <div class="row"><label>버튼</label>
-    <select id="m-buttons"><option value="none">없음</option><option value="ok" selected>OK</option><option value="yes_no">Yes / No</option></select>
-    타임아웃 <input type="number" id="m-timeout" value="0" min="0" max="3600000" step="1000"> ms</div>
+  <h2>Modal message<span class="sp"></span><button onclick="call('modal.get').then(r=>setText('modal-out', r))">Read</button></h2>
+  <div class="row"><label>Title</label><input type="text" id="m-title" value="Hello" style="flex:1"></div>
+  <div class="row"><label>Body</label><textarea id="m-body" rows="2">A message from the StackChan dashboard.</textarea></div>
+  <div class="row"><label>Buttons</label>
+    <select id="m-buttons"><option value="none">None</option><option value="ok" selected>OK</option><option value="yes_no">Yes / No</option></select>
+    Timeout <input type="number" id="m-timeout" value="0" min="0" max="3600000" step="1000"> ms</div>
   <div class="row">
-    <button class="primary" onclick="showModal()">표시</button>
-    <button onclick="call('modal.close')">닫기</button>
-    <span class="muted">0 = 계속 표시. 누른 결과가 아래에 표시됩니다.</span></div>
+    <button class="primary" onclick="showModal()">Show</button>
+    <button onclick="call('modal.close')">Close</button>
+    <span class="muted">0 = stays until closed. The button pressed is shown below.</span></div>
   <pre class="out" id="modal-out">-</pre>
 </section>
 
 <!-- LEDs -->
 <section>
-  <h2>LED (12개)<span class="sp"></span><button onclick="loadLeds()">읽기</button></h2>
-  <div class="row"><label>색</label><input type="color" id="led-color" value="#ff8000">
-    <button id="led-all-btn" onclick="ledAllToggle()">전체 켜기</button>
-    <button id="led-rainbow-btn" onclick="ledRainbow()">무지개</button></div>
-  <h3>왼쪽 0–5</h3><div class="leds" id="leds-left"></div>
-  <h3>오른쪽 6–11</h3><div class="leds" id="leds-right"></div>
-  <div class="row"><label>밝기</label><input type="range" id="led-bright" min="0" max="100" value="100"><span class="val" id="led-bright-v">100%</span></div>
+  <h2>LEDs (12)<span class="sp"></span><button onclick="loadLeds()">Read</button></h2>
+  <div class="row"><label>Color</label><input type="color" id="led-color" value="#ff8000">
+    <button id="led-all-btn" onclick="ledAllToggle()">All on</button>
+    <button id="led-rainbow-btn" onclick="ledRainbow()">Rainbow</button></div>
+  <h3>Left 0–5</h3><div class="leds" id="leds-left"></div>
+  <h3>Right 6–11</h3><div class="leds" id="leds-right"></div>
+  <div class="row"><label>Brightness</label><input type="range" id="led-bright" min="0" max="100" value="100"><span class="val" id="led-bright-v">100%</span></div>
 </section>
 
 <!-- Servo -->
 <section>
-  <h2>서보<span class="sp"></span><span data-rt="servo" data-streams="servo" data-hz="5"></span>
-    <button onclick="call('servo.get').then(showServo)">읽기</button></h2>
-  <div class="row"><label>전원</label><button id="servo-power-btn" onclick="servoPowerToggle()">-</button>
+  <h2>Servos<span class="sp"></span><span data-rt="servo" data-streams="servo" data-hz="5"></span>
+    <button onclick="call('servo.get').then(showServo)">Read</button></h2>
+  <div class="row"><label>Power</label><button id="servo-power-btn" onclick="servoPowerToggle()">-</button>
     <span class="badge" id="servo-power">-</span></div>
   <div class="row"><label>yaw</label><input type="range" id="yaw" min="-128" max="128" value="0"><span class="val" id="yaw-v">0°</span></div>
   <div class="row"><label>pitch</label><input type="range" id="pitch" min="5" max="85" value="5"><span class="val" id="pitch-v">5°</span></div>
-  <div class="row"><label>최저 속도</label><input type="range" id="min-speed" min="10" max="180" value="20"><span class="val" id="min-speed-v">20°/s</span></div>
-  <div class="row"><label>최고 속도</label><input type="range" id="speed" min="10" max="180" value="90"><span class="val" id="speed-v">90°/s</span></div>
+  <div class="row"><label>Min speed</label><input type="range" id="min-speed" min="10" max="180" value="20"><span class="val" id="min-speed-v">20°/s</span></div>
+  <div class="row"><label>Max speed</label><input type="range" id="speed" min="10" max="180" value="90"><span class="val" id="speed-v">90°/s</span></div>
   <div class="row">
-    <button class="primary" onclick="servoMove()">이동</button>
-    <button onclick="servoInitial()">초기 위치로 이동</button>
-    <label class="chip"><input type="checkbox" id="servo-live"> 슬라이더 따라 바로 이동</label></div>
+    <button class="primary" onclick="servoMove()">Move</button>
+    <button onclick="servoInitial()">Move to home</button>
+    <label class="chip"><input type="checkbox" id="servo-live"> Follow sliders live</label></div>
   <table class="kv" id="servo"></table>
 </section>
 
 <!-- Audio -->
 <section>
-  <h2>오디오<span class="sp"></span><span data-rt="audio" data-streams="audio" data-hz="10" data-on="1"></span></h2>
-  <div class="row"><label>마이크</label><div class="meter"><div id="mic-meter"></div></div><span class="val" id="mic-v">-</span></div>
-  <div class="row"><label>볼륨</label><input type="range" id="volume" min="0" max="100" value="45"><span class="val" id="volume-v">45</span></div>
-  <div class="row"><label>비프</label>
+  <h2>Audio<span class="sp"></span><span data-rt="audio" data-streams="audio" data-hz="10" data-on="1"></span></h2>
+  <div class="row"><label>Mic</label><div class="meter"><div id="mic-meter"></div></div><span class="val" id="mic-v">-</span></div>
+  <div class="row"><label>Volume</label><input type="range" id="volume" min="0" max="100" value="45"><span class="val" id="volume-v">45</span></div>
+  <div class="row"><label>Beep</label>
     <input type="number" id="beep-f" value="880" min="20" max="12000"> Hz
     <input type="number" id="beep-d" value="250" min="1" max="1000"> ms
-    <select id="beep-w"><option value="sine">사인</option><option value="square">사각</option><option value="triangle">삼각</option><option value="ramp" selected>톱니</option></select>
-    <button class="primary" onclick="call('audio.beep',{freq_hz:num('beep-f'),duration_ms:num('beep-d'),wave:val('beep-w')})">재생</button></div>
-  <div class="row"><label>프리셋</label>
-    <button onclick="melody([[523,120],[659,120],[784,200]])">도미솔</button>
-    <button onclick="melody([[784,120],[659,120],[523,200]])">솔미도</button>
-    <button onclick="melody([[1200,60],[1200,60]])">삑삑</button></div>
+    <select id="beep-w"><option value="sine">Sine</option><option value="square">Square</option><option value="triangle">Triangle</option><option value="ramp" selected>Ramp</option></select>
+    <button class="primary" onclick="call('audio.beep',{freq_hz:num('beep-f'),duration_ms:num('beep-d'),wave:val('beep-w')})">Play</button></div>
+  <div class="row"><label>Presets</label>
+    <button onclick="melody([[523,120],[659,120],[784,200]])">C-E-G</button>
+    <button onclick="melody([[784,120],[659,120],[523,200]])">G-E-C</button>
+    <button onclick="melody([[1200,60],[1200,60]])">Beep beep</button></div>
 </section>
 
 <!-- Camera -->
 <section>
-  <h2>카메라<span class="sp"></span><span data-poll="snapshot" data-sec="1"></span>
-    <button class="primary" onclick="snapshot()">촬영</button></h2>
+  <h2>Camera<span class="sp"></span><span data-poll="snapshot" data-sec="1"></span>
+    <button class="primary" onclick="snapshot()">Snapshot</button></h2>
   <img class="frame" id="snap" alt="">
-  <div class="row"><label>해상도</label>
+  <div class="row"><label>Resolution</label>
     <select id="cam-size" onchange="setResolution()"><option value="qqvga">QQVGA 160×120</option><option value="qvga" selected>QVGA 320×240</option><option value="vga">VGA 640×480</option></select></div>
 </section>
 
 <!-- IMU -->
 <section>
-  <h2>IMU · 자세<span class="sp"></span><span data-rt="imu" data-streams="imu" data-hz="20" data-on="1"></span>
-    <button onclick="imuReset()" title="현재 자세를 기준으로 방향(yaw)을 0으로">방향 초기화</button></h2>
+  <h2>IMU · Orientation<span class="sp"></span><span data-rt="imu" data-streams="imu" data-hz="20" data-on="1"></span>
+    <button onclick="imuReset()" title="Set heading (yaw) to 0 at the current orientation">Reset heading</button></h2>
   <canvas id="imu3d" width="360" height="280" style="background:var(--bg)"></canvas>
   <div class="row muted">
     <span style="color:var(--x)">■ x</span><span style="color:var(--y)">■ y</span><span style="color:var(--z)">■ z</span>
-    · 기울기 <b id="imu-tilt">-</b> · 상태 <b id="imu-motion">-</b></div>
-  <details><summary>숫자 보기</summary><table class="kv" id="imu"></table></details>
+    · Tilt <b id="imu-tilt">-</b> · State <b id="imu-motion">-</b></div>
+  <details><summary>Values</summary><table class="kv" id="imu"></table></details>
 </section>
 
 <!-- Touch / button / light -->
 <section>
-  <h2>터치 · 버튼 · 빛<span class="sp"></span><span data-rt="touch" data-streams="touch,button,light" data-hz="10" data-on="1"></span></h2>
+  <h2>Touch · Button · Light<span class="sp"></span><span data-rt="touch" data-streams="touch,button,light" data-hz="10" data-on="1"></span></h2>
   <svg id="touchviz" viewBox="0 0 360 300" width="100%">
-    <text x="10" y="14">머리 (위에서 본 모습)</text>
-    <text x="10" y="40">앞</text><text x="330" y="40">뒤</text>
+    <text x="10" y="14">Head (top view)</text>
+    <text x="10" y="40">Front</text><text x="330" y="40">Back</text>
     <rect class="seg" id="z-front" x="30" y="22" width="96" height="30" rx="6"/>
     <rect class="seg" id="z-middle" x="132" y="22" width="96" height="30" rx="6"/>
     <rect class="seg" id="z-back" x="234" y="22" width="96" height="30" rx="6"/>
     <text id="z-kind" x="180" y="68" text-anchor="middle"></text>
-    <text x="10" y="92">화면 (320×240)</text>
+    <text x="10" y="92">Screen (320×240)</text>
     <rect class="frame" x="10" y="100" width="160" height="120" rx="4"/>
     <g id="scr-marks"></g>
     <circle id="scr-dot" cx="-20" cy="-20" r="7" class="lit"/>
-    <text x="200" y="92">전원 버튼</text>
+    <text x="200" y="92">Power button</text>
     <circle id="btn-c" cx="230" cy="130" r="22" class="seg"/>
-    <text x="200" y="182">조도</text>
+    <text x="200" y="182">Light</text>
     <rect class="bar-bg" x="200" y="190" width="150" height="10" rx="3"/>
     <rect id="lux-bar" class="lit" x="200" y="190" width="0" height="10" rx="3" style="fill:var(--warn)"/>
     <text id="lux-t" x="350" y="182" text-anchor="end">-</text>
-    <text x="10" y="248">근접</text>
+    <text x="10" y="248">Proximity</text>
     <rect class="bar-bg" x="10" y="256" width="340" height="12" rx="3"/>
     <rect id="prox-bar" class="lit" x="10" y="256" width="0" height="12" rx="3"/>
     <line x1="51.5" x2="51.5" y1="252" y2="272" stroke="var(--muted)" stroke-dasharray="2 2"/>
     <line x1="76.4" x2="76.4" y1="252" y2="272" stroke="var(--muted)" stroke-dasharray="2 2"/>
     <text id="prox-t" x="350" y="290" text-anchor="end">-</text>
-    <text x="10" y="290">점선: far 250 / near 400</text>
+    <text x="10" y="290">Dashed: far 250 / near 400</text>
   </svg>
-  <details><summary>숫자 보기</summary><table class="kv" id="touch"></table><table class="kv" id="light"></table></details>
+  <details><summary>Values</summary><table class="kv" id="touch"></table><table class="kv" id="light"></table></details>
 </section>
 
 <!-- Time -->
 <section>
-  <h2>시계 (RTC, UTC)<span class="sp"></span><button onclick="loadTime()">읽기</button></h2>
+  <h2>Clock (RTC, UTC)<span class="sp"></span><button onclick="loadTime()">Read</button></h2>
   <table class="kv" id="time"></table>
   <div class="row">
-    <button class="primary" onclick="setTimeNow()">브라우저 시간과 동기화</button></div>
+    <button class="primary" onclick="setTimeNow()">Sync with browser time</button></div>
   <div class="row">
     <input type="text" id="time-iso" placeholder="2026-11-13T12:00:00">
-    <button onclick="call('time.set',{iso:val('time-iso')}).then(loadTime)">직접 설정</button></div>
+    <button onclick="call('time.set',{iso:val('time-iso')}).then(loadTime)">Set</button></div>
 </section>
 
 <!-- Events -->
 <section class="wide">
-  <h2>이벤트<span class="sp"></span>
-    <button onclick="setSubs(EVENTS)">모두 구독</button>
-    <button onclick="setSubs([])">모두 해제</button>
-    <button onclick="clearLog('events-log')">지우기</button></h2>
+  <h2>Events<span class="sp"></span>
+    <button onclick="setSubs(EVENTS)">Subscribe all</button>
+    <button onclick="setSubs([])">Unsubscribe all</button>
+    <button onclick="clearLog('events-log')">Clear</button></h2>
   <div class="chips" id="subs"></div>
   <div class="log" id="events-log" style="margin-top:8px"></div>
 </section>
 
 <!-- Logs -->
 <section class="wide">
-  <h2>기기 로그<span class="sp"></span>
-    레벨 <select id="log-level"><option>E</option><option>W</option><option selected>I</option><option>D</option><option>V</option><option>none</option></select>
-    <button onclick="call('log.set_level',{level:val('log-level')})">적용</button>
-    전원 로그 <input type="number" id="pwr-int" value="0" min="0" max="86400"> 초
-    <button onclick="call('log.set_power_interval',{interval_s:num('pwr-int')})">적용</button>
-    <button onclick="clearLog('logs')">지우기</button></h2>
+  <h2>Device log<span class="sp"></span>
+    Level <select id="log-level"><option>E</option><option>W</option><option selected>I</option><option>D</option><option>V</option><option>none</option></select>
+    <button onclick="call('log.set_level',{level:val('log-level')})">Apply</button>
+    Power log <input type="number" id="pwr-int" value="0" min="0" max="86400"> s
+    <button onclick="call('log.set_power_interval',{interval_s:num('pwr-int')})">Apply</button>
+    <button onclick="clearLog('logs')">Clear</button></h2>
   <div class="log" id="logs"></div>
 </section>
 
 <!-- RPC trace -->
 <section class="wide">
-  <h2>RPC 기록<span class="sp"></span>
-    <label class="stream"><input type="checkbox" id="trace-on" checked> 기록</label>
-    <label class="stream"><input type="checkbox" id="trace-ntf"> 알림(notify.*)도 표시</label>
-    <button onclick="clearLog('trace')">지우기</button></h2>
+  <h2>RPC trace<span class="sp"></span>
+    <label class="stream"><input type="checkbox" id="trace-on" checked> Record</label>
+    <label class="stream"><input type="checkbox" id="trace-ntf"> Include notifications (notify.*)</label>
+    <button onclick="clearLog('trace')">Clear</button></h2>
   <div class="log" id="trace"></div>
-  <div class="muted">Pi의 서버가 기기와 실제로 주고받은 JSON-RPC입니다 (→ 보냄, ← 받음). 다른 브라우저에서 보낸 것도 보입니다. 긴 값(이미지 base64)은 줄여서 표시합니다.</div>
+  <div class="muted">JSON-RPC exchanged between the Pi server and the device (→ sent, ← received), including traffic from other browsers. Long values (image base64) are shortened.</div>
 </section>
 
 <!-- RPC console -->
 <section class="wide">
-  <h2>RPC 콘솔<span class="sp"></span><span class="muted">모든 메서드를 직접 호출할 수 있습니다 (디버그 i2c.* 포함)</span></h2>
+  <h2>RPC console<span class="sp"></span><span class="muted">Call any method directly (including debug i2c.*)</span></h2>
   <div class="row">
     <input type="text" id="rpc-method" list="rpc-methods" placeholder="method" value="sys.info" style="width:220px">
     <datalist id="rpc-methods"></datalist>
-    <input type="text" id="rpc-params" placeholder='params JSON, 예: {"yaw":10}' style="flex:1">
+    <input type="text" id="rpc-params" placeholder='params JSON, e.g. {"yaw":10}' style="flex:1">
     timeout <input type="number" id="rpc-timeout" value="5" min="1" max="30"> s
-    <button class="primary" onclick="rpcConsole()">호출</button></div>
+    <button class="primary" onclick="rpcConsole()">Call</button></div>
   <pre class="out" id="rpc-out">-</pre>
 </section>
 
@@ -328,9 +328,9 @@ const EXPRESSIONS = ['neutral','happy','unhappy','angry','sad','sleepy'];
 const DECORATORS = ['heart','angry','sweat','shy','question'];
 // key, label, min, max, step, default (firmware defaults)
 const FACE_PARAMS = [
-  ['eye_x', '시선 좌우', -1, 1, 0.05, 0], ['eye_y', '시선 상하', -1, 1, 0.05, 0],
-  ['eye_open', '눈 뜸', 0, 1, 0.05, 1], ['mouth_open', '입 벌림', 0, 1, 0.05, 0],
-  ['mouth_rot', '입 회전', -45, 45, 1, 0], ['mouth_size', '입 크기', 0.25, 2, 0.05, 0.5],
+  ['eye_x', 'Gaze x', -1, 1, 0.05, 0], ['eye_y', 'Gaze y', -1, 1, 0.05, 0],
+  ['eye_open', 'Eye open', 0, 1, 0.05, 1], ['mouth_open', 'Mouth open', 0, 1, 0.05, 0],
+  ['mouth_rot', 'Mouth rotation', -45, 45, 1, 0], ['mouth_size', 'Mouth size', 0.25, 2, 0.05, 0.5],
 ];
 const SERVO_INITIAL = {yaw: 0, pitch: 5};
 
@@ -353,7 +353,7 @@ async function call(method, params, timeout = 5, quiet = false) {
     const r = await fetch('/api/call', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                         body: JSON.stringify({method, params, timeout})});
     j = await r.json();
-  } catch (e) { j = {error: {code: 0, message: '서버에 연결할 수 없음'}}; }
+  } catch (e) { j = {error: {code: 0, message: 'Cannot reach the server'}}; }
   if (j.error) {
     stats.fail++;
     if (!quiet) toast(`${method}: ${j.error.message} (${j.error.code})`);
@@ -375,7 +375,7 @@ function armButton(btn, label, action) {
   const original = btn.textContent; let timer = null;
   btn.onclick = () => {
     if (!btn.classList.contains('armed')) {
-      btn.classList.add('armed'); btn.textContent = `한 번 더 누르면 ${label}`;
+      btn.classList.add('armed'); btn.textContent = `Press again to ${label.toLowerCase()}`;
       timer = setTimeout(() => { btn.classList.remove('armed'); btn.textContent = original; }, 3000);
       return;
     }
@@ -418,7 +418,7 @@ function appendLog(id, html, cls) {
 }
 function clearLog(id) { $(id).innerHTML = ''; }
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
-const now = () => new Date().toLocaleTimeString('ko-KR', {hour12: false});
+const now = () => new Date().toLocaleTimeString('en-GB', {hour12: false});
 function bindRange(id, fmt, send) {
   const el = $(id), out = $(id + '-v');
   const t = send ? throttle(send, 120) : null;
@@ -433,7 +433,7 @@ function buildRealtime() {
   for (const el of document.querySelectorAll('[data-rt]')) {
     const key = el.dataset.rt;
     el.className = 'stream';
-    el.innerHTML = `<label><input type="checkbox"${el.dataset.on ? ' checked' : ''}> 스트림</label>` +
+    el.innerHTML = `<label><input type="checkbox"${el.dataset.on ? ' checked' : ''}> Stream</label>` +
                    `<input type="number" min="1" max="100" value="${el.dataset.hz}">Hz`;
     const [box, rate] = el.querySelectorAll('input');
     RT[key] = {streams: el.dataset.streams.split(','), box, rate};
@@ -442,7 +442,7 @@ function buildRealtime() {
   for (const el of document.querySelectorAll('[data-poll]')) {
     const fn = {snapshot}[el.dataset.poll];
     el.className = 'stream';
-    el.innerHTML = `<label><input type="checkbox"> 자동</label><input type="number" min="1" max="60" value="${el.dataset.sec}">초`;
+    el.innerHTML = `<label><input type="checkbox"> Auto</label><input type="number" min="1" max="60" value="${el.dataset.sec}">s`;
     const [box, sec] = el.querySelectorAll('input');
     let timer = null;
     const loop = async () => {
@@ -470,7 +470,7 @@ const STREAM_HANDLERS = {status: showStatus, imu: onImu, light: showLight, servo
 // ---------- system / connection ----------
 async function loadInfo() {
   const info = await call('sys.info');
-  setKv('info', info, {fw_version: '펌웨어', build_date: '빌드', mac: 'MAC'});
+  setKv('info', info, {fw_version: 'Firmware', build_date: 'Build', mac: 'MAC'});
   const methods = await call('rpc.list');
   $('rpc-methods').innerHTML = methods.map(m => `<option value="${m}">`).join('');
 }
@@ -481,18 +481,18 @@ async function doPing() {
   showConn();
 }
 function showConn() {
-  const yes = b => b ? '<span class="dot on"></span>연결됨' : '<span class="dot"></span>끊김';
+  const yes = b => b ? '<span class="dot on"></span>Connected' : '<span class="dot"></span>Disconnected';
   setKv('conn', {
-    '브라우저 ↔ Pi 서버': {html: yes(stats.server)},
-    'Pi ↔ StackChan (USB 시리얼)': {html: yes(stats.device)},
-    'ping (왕복)': stats.ping == null ? '-' : `${stats.ping.toFixed(0)} ms`,
-    'RPC 성공 / 실패': `${stats.ok} / ${stats.fail}`,
-    '이벤트 유실': stats.lost,
-    '마지막 수신': stats.lastMsg ? stats.lastMsg.toLocaleTimeString('ko-KR', {hour12: false}) : '-',
+    'Browser ↔ Pi server': {html: yes(stats.server)},
+    'Pi ↔ StackChan (USB serial)': {html: yes(stats.device)},
+    'Ping (round trip)': stats.ping == null ? '-' : `${stats.ping.toFixed(0)} ms`,
+    'RPC ok / failed': `${stats.ok} / ${stats.fail}`,
+    'Events lost': stats.lost,
+    'Last received': stats.lastMsg ? stats.lastMsg.toLocaleTimeString('en-GB', {hour12: false}) : '-',
   });
   const ok = stats.server && stats.device;
   $('conn-dot').classList.toggle('on', ok);
-  $('conn-text').textContent = !stats.server ? '서버 연결 끊김' : stats.device ? '연결됨' : '기기 연결 끊김';
+  $('conn-text').textContent = !stats.server ? 'Server disconnected' : stats.device ? 'Connected' : 'Device disconnected';
 }
 function fmtBytes(b) {
   return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${(b / 1024).toFixed(0)} KB` : `${b} B`;
@@ -500,12 +500,12 @@ function fmtBytes(b) {
 function showStatus(s) {
   const unit = (v, u, d = 0) => v == null ? '-' : `${Number(v).toFixed(d)} ${u}`;
   setKv('status', {
-    '배터리': `${s.batt_pct}%`, '배터리 전압': unit(s.batt_mv / 1000, 'V', 2), '배터리 전류': unit(s.batt_ma, 'mA'),
-    '충전 중': s.charging ? '예' : '아니오', '충전 상태': s.charge_state,
-    '충전 모드': s.charge_mode === 'full' ? '완충' : `보관 (충전기 ${s.charger_on ? '켜짐' : '꺼짐'})`,
-    'USB 전원 (VBUS)': s.vbus ? '연결' : '없음', 'USB 전압': unit(s.vbus_mv / 1000, 'V', 2),
-    '가동 시간': fmtUptime(s.uptime_ms), '칩 온도': unit(s.chip_temp_c, '°C', 1), 'PMIC 온도': unit(s.pmic_temp_c, '°C', 1),
-    '여유 메모리': fmtBytes(s.free_heap)});
+    'Battery': `${s.batt_pct}%`, 'Battery voltage': unit(s.batt_mv / 1000, 'V', 2), 'Battery current': unit(s.batt_ma, 'mA'),
+    'Charging': s.charging ? 'Yes' : 'No', 'Charge state': s.charge_state,
+    'Charge mode': s.charge_mode === 'full' ? 'Full' : `Storage (charger ${s.charger_on ? 'on' : 'off'})`,
+    'USB power (VBUS)': s.vbus ? 'Present' : 'None', 'USB voltage': unit(s.vbus_mv / 1000, 'V', 2),
+    'Uptime': fmtUptime(s.uptime_ms), 'Chip temperature': unit(s.chip_temp_c, '°C', 1), 'PMIC temperature': unit(s.pmic_temp_c, '°C', 1),
+    'Free memory': fmtBytes(s.free_heap)});
   $('full-charge').checked = s.charge_mode === 'full';
   if (s.idle_s !== undefined) showIdle(s.idle_s, s.idle_level);
 }
@@ -513,7 +513,7 @@ function showStatus(s) {
 // ---------- idle ----------
 const IDLE_START_S = [0, 600, 1800, 3600];
 let idleBase = null;  // {idle_s, level, at}
-const fmtMs = sec => `${Math.floor(sec / 60)}분 ${String(Math.floor(sec % 60)).padStart(2, '0')}초`;
+const fmtMs = sec => `${Math.floor(sec / 60)} min ${String(Math.floor(sec % 60)).padStart(2, '0')} s`;
 function showIdle(idle_s, level) {
   idleBase = {idle_s, level, at: performance.now()};
   renderIdle();
@@ -522,8 +522,8 @@ function renderIdle() {
   if (!idleBase) return;
   const idle = idleBase.idle_s + (performance.now() - idleBase.at) / 1000, level = idleBase.level;
   for (const b of $('idle-levels').children) b.classList.toggle('sel', Number(b.dataset.level) === level);
-  setKv('idle', {'무활동 시간': fmtMs(idle),
-    '다음 단계까지': level < 3 ? `${fmtMs(Math.max(0, IDLE_START_S[level + 1] - idle))} (level ${level + 1})` : '-'});
+  setKv('idle', {'Idle time': fmtMs(idle),
+    'Next level in': level < 3 ? `${fmtMs(Math.max(0, IDLE_START_S[level + 1] - idle))} (level ${level + 1})` : '-'});
 }
 async function setIdleLevel(level) {
   const r = await call('idle.set_level', {level});
@@ -540,7 +540,7 @@ function buildFace() {
   $('face-params').innerHTML = FACE_PARAMS.map(([k, label, min, max, step, def]) =>
     `<div class="row"><label>${label}</label><input type="range" id="fp-${k}" min="${min}" max="${max}" step="${step}" value="${def}">` +
     `<span class="val" id="fp-${k}-v">${def}</span></div>`).join('') +
-    '<div class="row"><button onclick="resetFaceParams()">파라미터 초기화</button></div>';
+    '<div class="row"><button onclick="resetFaceParams()">Reset parameters</button></div>';
   for (const [k] of FACE_PARAMS) bindRange('fp-' + k, v => v, v => call('face.set_params', {[k]: v}));
   $('decorators').innerHTML = DECORATORS.map(d =>
     `<label class="chip"><input type="checkbox" id="dec-${d}"> ${d}</label>`).join('');
@@ -600,9 +600,9 @@ function paintLeds() {
     b.style.setProperty('--glow', rgbCss(c));
     b.classList.toggle('on', on);
   }
-  $('led-all-btn').textContent = ledColors.some(ledOn) ? '전체 끄기' : '전체 켜기';
+  $('led-all-btn').textContent = ledColors.some(ledOn) ? 'All off' : 'All on';
   $('led-rainbow-btn').classList.toggle('sel', ledEffect === 'rainbow');
-  $('led-rainbow-btn').textContent = ledEffect === 'rainbow' ? '무지개 멈춤' : '무지개';
+  $('led-rainbow-btn').textContent = ledEffect === 'rainbow' ? 'Stop rainbow' : 'Rainbow';
 }
 // Firmware rainbow: hue gradient over the 12 LEDs, rotating (set_* stops it)
 const RAINBOW_MS = 3000;
@@ -657,14 +657,14 @@ function showServo(s) {
   const rows = {};
   for (const ax of ['yaw', 'pitch']) {
     const a = s[ax]; if (!a) continue;
-    rows[`${ax} 각도 / 목표`] = `${a.angle ?? '-'}° / ${a.target}°`;
-    if (a.temp_c !== undefined) rows[`${ax} 온도 · 전압 · 부하`] = `${a.temp_c}°C · ${a.volt_mv}mV · ${a.load}`;
+    rows[`${ax} angle / target`] = `${a.angle ?? '-'}° / ${a.target}°`;
+    if (a.temp_c !== undefined) rows[`${ax} temp · voltage · load`] = `${a.temp_c}°C · ${a.volt_mv}mV · ${a.load}`;
   }
   setKv('servo', rows);
   servoPowered = !!(s.yaw && s.yaw.powered);
-  $('servo-power').textContent = servoPowered ? '켜짐 (힘 유지)' : '꺼짐 (힘 풀림)';
+  $('servo-power').textContent = servoPowered ? 'On (holding)' : 'Off (free)';
   $('servo-power').className = 'badge ' + (servoPowered ? 'ok' : 'bad');
-  $('servo-power-btn').textContent = servoPowered ? '서보 끄기' : '서보 켜기';
+  $('servo-power-btn').textContent = servoPowered ? 'Servos off' : 'Servos on';
   $('servo-power-btn').className = servoPowered ? '' : 'primary';
 }
 
@@ -732,8 +732,8 @@ function onImu(r) {
 function showImuNumbers(r) {
   $('imu-tilt').textContent = r.tilt_deg != null ? `${Number(r.tilt_deg).toFixed(1)}°` : '-';
   $('imu-motion').textContent = r.motion ?? '-';
-  setKv('imu', {'가속 x / y / z (g)': v3([r.ax, r.ay, r.az], 3), '자이로 x / y / z (°/s)': v3([r.gx, r.gy, r.gz], 1),
-                '지자기 x / y / z (µT)': v3([r.mx, r.my, r.mz], 1), '기울기 (°)': r.tilt_deg, '보드 온도 (°C, IMU)': r.temp_c, '상태': r.motion});
+  setKv('imu', {'Accel x / y / z (g)': v3([r.ax, r.ay, r.az], 3), 'Gyro x / y / z (°/s)': v3([r.gx, r.gy, r.gz], 1),
+                'Mag x / y / z (µT)': v3([r.mx, r.my, r.mz], 1), 'Tilt (°)': r.tilt_deg, 'Board temperature (°C, IMU)': r.temp_c, 'State': r.motion});
 }
 function draw3d() {
   const cv = $('imu3d'), g = cv.getContext('2d'), W = cv.width, H = cv.height, S = 95;
@@ -805,8 +805,8 @@ function showTouch(t) {
   const dot = $('scr-dot');
   if (t.screen.pressed) { dot.setAttribute('cx', 10 + t.screen.x / 2); dot.setAttribute('cy', 100 + t.screen.y / 2); }
   else { dot.setAttribute('cx', -20); dot.setAttribute('cy', -20); }
-  setKv('touch', {'머리 front / middle / back 레벨': t.head.level.join(' / '),
-    '화면': t.screen.pressed ? `눌림 (${t.screen.x}, ${t.screen.y})` : '-', '터치 이벤트 수': t.count});
+  setKv('touch', {'Head front / middle / back level': t.head.level.join(' / '),
+    'Screen': t.screen.pressed ? `Pressed (${t.screen.x}, ${t.screen.y})` : '-', 'Touch events': t.count});
 }
 function showButton(b) {
   $('btn-c').style.fill = b.pressed ? 'var(--accent)' : '';
@@ -817,8 +817,8 @@ function showLight(r) {
   $('lux-t').textContent = `${lux} lux`;
   $('prox-bar').setAttribute('width', 340 * Math.min(1, r.proximity / 2047));
   $('prox-bar').style.fill = r.near ? 'var(--bad)' : '';
-  $('prox-t').textContent = `${r.proximity}${r.near ? ' · 가까움' : ''}`;
-  setKv('light', {'조도 (lux)': r.lux, '근접 (0–2047)': r.proximity, '가까움': r.near});
+  $('prox-t').textContent = `${r.proximity}${r.near ? ' · near' : ''}`;
+  setKv('light', {'Light (lux)': r.lux, 'Proximity (0–2047)': r.proximity, 'Near': r.near});
 }
 function touchMark(x, y, kind) {
   const ns = 'http://www.w3.org/2000/svg', c = document.createElementNS(ns, 'circle');
@@ -837,7 +837,7 @@ function buttonFlash() {
 }
 
 // ---------- time ----------
-function loadTime() { return call('time.get').then(r => setKv('time', r, {iso: '시각 (UTC)', valid: '유효'})); }
+function loadTime() { return call('time.get').then(r => setKv('time', r, {iso: 'Time (UTC)', valid: 'Valid'})); }
 function setTimeNow() { call('time.set', {iso: new Date().toISOString().slice(0, 19)}).then(loadTime); }
 
 // ---------- events / subscriptions ----------
@@ -862,9 +862,9 @@ function onEvent(p) {
   stats.lastSeq = seq;
   appendLog('events-log', `<span class="t">${now()} #${seq}</span> <b>${esc(name)}</b> ${esc(JSON.stringify(rest))}`,
             name === 'error' || name === 'servo.fault' ? 'E' : '');
-  if (name === 'boot') { toast('기기가 부팅됨: 구독·스트림을 다시 설정합니다', true); setTimeout(refreshAll, 300); }
+  if (name === 'boot') { toast('Device booted: re-applying subscriptions and streams', true); setTimeout(refreshAll, 300); }
   if (name === 'modal.result') setText('modal-out', rest);
-  if (name === 'servo.fault') { toast(`서보 고장: ${rest.servo} ${rest.kind} (전원 차단됨)`); call('servo.get', null, 5, true).then(showServo, ignore); }
+  if (name === 'servo.fault') { toast(`Servo fault: ${rest.servo} ${rest.kind} (power cut)`); call('servo.get', null, 5, true).then(showServo, ignore); }
   if (name === 'touch.screen') touchMark(rest.x, rest.y, rest.kind);
   if (name === 'touch.head') headKind(rest.zone, rest.kind);
   if (name === 'button') buttonFlash();
@@ -916,7 +916,7 @@ async function resetDefaults() {
   for (const [m, p] of steps) await call(m, p, 10).catch(ignore);
   setRange('bright', 128); $('cam-size').value = 'qvga'; $('log-level').value = 'I'; $('pwr-int').value = 0;
   await refreshAll();
-  toast('기본값으로 초기화했습니다 (서보 제외)', true);
+  toast('Reset to defaults (servos excluded)', true);
 }
 
 // ---------- connection ----------
@@ -945,7 +945,7 @@ function connect() {
 async function rpcConsole() {
   let params;
   try { params = val('rpc-params').trim() ? JSON.parse(val('rpc-params')) : undefined; }
-  catch (e) { setText('rpc-out', 'params JSON 오류: ' + e.message); return; }
+  catch (e) { setText('rpc-out', 'params JSON error: ' + e.message); return; }
   const t = performance.now();
   try {
     const r = await call(val('rpc-method'), params, num('rpc-timeout'), true);
@@ -956,8 +956,8 @@ async function rpcConsole() {
 // ---------- init ----------
 function init() {
   buildFace(); buildLeds(); buildSubs(); buildRealtime(); paintLeds(); draw3d(); showConn();
-  armButton($('btn-reboot'), '재부팅', () => call('sys.reboot').then(() => toast('재부팅합니다', true)));
-  armButton($('btn-poweroff'), '전원 끄기', () => call('sys.power_off').then(() => toast('전원을 끕니다', true)));
+  armButton($('btn-reboot'), 'Reboot', () => call('sys.reboot').then(() => toast('Rebooting', true)));
+  armButton($('btn-poweroff'), 'Power off', () => call('sys.power_off').then(() => toast('Powering off', true)));
   bindRange('bright', v => v, v => call('display.set_brightness', {value: v}));
   bindRange('led-bright', v => v + '%', v => call('led.set_brightness', {value: v}));
   bindRange('volume', v => v, v => call('audio.set_volume', {value: v}));
