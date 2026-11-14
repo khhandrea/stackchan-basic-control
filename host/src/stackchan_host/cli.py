@@ -1,4 +1,4 @@
-"""Command-line tool: ``stackchan ping``, ``stackchan call <method> [params]``, ``stackchan listen``, ``stackchan capture``."""
+"""Command-line tool: ``stackchan ping``, ``stackchan call <method> [params]``, ``stackchan listen``, ``stackchan capture``, ``stackchan serve``."""
 
 from __future__ import annotations
 
@@ -74,7 +74,20 @@ def main() -> int:
     p.add_argument("output")
     p.set_defaults(func=cmd_capture)
 
+    p = sub.add_parser("serve", help="web dashboard to watch and control the device")
+    p.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all interfaces)")
+    p.add_argument("--http-port", type=int, default=8080)
+    p.set_defaults(func=None)
+
     args = parser.parse_args()
+    if args.command == "serve":
+        from .server import serve
+
+        try:
+            serve(args.port, args.host, args.http_port)
+        except KeyboardInterrupt:
+            pass
+        return 0
     try:
         with StackChanClient(args.port) as client:
             return args.func(client, args)

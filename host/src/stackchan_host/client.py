@@ -6,7 +6,7 @@ import itertools
 import json
 import queue
 import threading
-from typing import Any
+from typing import Any, Callable
 
 import serial
 
@@ -37,9 +37,16 @@ class StackChanClient:
         self._lock = threading.Lock()
         self._write_lock = threading.Lock()
         self.notifications: queue.Queue[dict[str, Any]] = queue.Queue()
+        # Optional observer of requests sent ("tx") and responses received ("rx"), called from I/O threads
+        self.trace: Callable[[str, dict[str, Any]], None] | None = None
         self._closed = threading.Event()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+
+    @property
+    def alive(self) -> bool:
+        """False once the serial port failed (e.g. the device rebooted or powered off)."""
+        return self._reader.is_alive() and not self._closed.is_set()
 
     def close(self) -> None:
         self._closed.set()
@@ -77,6 +84,8 @@ class StackChanClient:
         self._send({"method": method, **({"params": params} if params else {})})
 
     def _send(self, message: dict[str, Any]) -> None:
+        if self.trace is not None:
+            self.trace("tx", message)
         line = json.dumps(message, separators=(",", ":")) + "\n"
         with self._write_lock:
             self._serial.write(line.encode())
@@ -111,6 +120,8 @@ class StackChanClient:
         if "id" in message and ("result" in message or "error" in message):
             with self._lock:
                 slot = self._pending.get(message["id"])
+            if self.trace is not None:
+                self.trace("rx", message)
             if slot is not None:
                 slot.put(message)
                 return

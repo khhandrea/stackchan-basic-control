@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StackChan 대시보드</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1d2330; --muted: #6b7385; --line: #e2e5eb;
+    --accent: #2f6fde; --accent-soft: #e8f0fd; --ok: #1f9d55; --warn: #c27c0e; --bad: #d64545;
+    --x: #e5484d; --y: #3e7bfa; --z: #30a46c;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b1f27; --text: #e6e9ef; --muted: #8d95a7; --line: #2b313c;
+      --accent: #6a9cf2; --accent-soft: #22324d; --ok: #3cc47c; --warn: #e0a43a; --bad: #ef6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px;
+           padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--ok); }
+  main { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; padding: 16px 20px 40px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  section.wide { grid-column: span 2; }
+  @media (max-width: 840px) { section.wide { grid-column: auto; } }
+  section h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  section h2 .sp { flex: 1; }
+  h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 12px 0 6px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+  .row > label:first-child { min-width: 84px; color: var(--muted); }
+  button { font: inherit; padding: 5px 11px; border-radius: 6px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button.sel { background: var(--accent-soft); border-color: var(--accent); }
+  input[type=text], input[type=number], select, textarea {
+    font: inherit; padding: 4px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  input[type=number] { width: 80px; }
+  input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+  textarea { width: 100%; resize: vertical; }
+  .val { font-family: var(--mono); min-width: 52px; text-align: right; }
+  table.kv { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.kv td { padding: 3px 4px; border-bottom: 1px solid var(--line); }
+  table.kv td:first-child { color: var(--muted); width: 42%; }
+  table.kv td:last-child { font-family: var(--mono); text-align: right; }
+  .stream { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .stream input[type=number] { width: 54px; padding: 2px 4px; }
+  .log { font-family: var(--mono); font-size: 12px; height: 240px; overflow: auto; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 6px; padding: 6px; white-space: pre-wrap; word-break: break-all; }
+  .log div { border-bottom: 1px dotted var(--line); padding: 1px 0; }
+  .log .t { color: var(--muted); }
+  .log .E { color: var(--bad); } .log .W { color: var(--warn); }
+  .log .tx { color: var(--accent); } .log .rx { color: var(--ok); } .log .ntf { color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 14px; font-size: 13px; }
+  .leds { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .led { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--muted); }
+  .led button { width: 42px; height: 42px; border-radius: 50%; padding: 0; background: #000; border: 2px solid var(--line); }
+  .led button.on { border-color: var(--accent); box-shadow: 0 0 10px var(--glow, transparent); }
+  canvas, img.frame { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #000; display: block; }
+  .meter { flex: 1; height: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .meter > div { height: 100%; width: 0; background: var(--ok); transition: width .1s; }
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-weight: 500; }
+  .badge.ok { color: var(--ok); } .badge.bad { color: var(--bad); }
+  .big { font-size: 26px; font-weight: 600; font-family: var(--mono); }
+  pre.out { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+            padding: 6px; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 6px 0 0; }
+  .muted { color: var(--muted); font-size: 12px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
+  svg text { font: 11px system-ui, sans-serif; fill: var(--muted); }
+  svg .seg { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; transition: fill .08s; }
+  svg .frame { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+  svg .lit { fill: var(--accent); }
+  svg .bar-bg { fill: var(--bg); stroke: var(--line); }
+  #toast { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 6px; z-index: 20; }
+  #toast div { background: var(--bad); color: #fff; padding: 8px 12px; border-radius: 6px; max-width: 420px; box-shadow: 0 2px 8px #0003; }
+  #toast div.info { background: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>StackChan</h1>
+  <span><span id="conn-dot" class="dot"></span><span id="conn-text">연결 중…</span></span>
+</header>
+
+<main>
+
+<!-- System -->
+<section>
+  <h2>시스템</h2>
+  <table class="kv" id="info"></table>
+  <div class="row">
+    <button onclick="resetDefaults()" title="얼굴·화면·모달·LED·볼륨·카메라·로그를 기본값으로 (서보는 제외)">기본값으로 초기화</button>
+    <button class="danger" id="btn-reboot">재부팅</button>
+    <button class="danger" id="btn-poweroff">전원 끄기</button>
+  </div>
+  <div class="row"><label class="chip" title="끄면 보관 모드: USB 연결 중 40% 아래에서만 충전하고 60%에서 멈춤">
+    <input type="checkbox" id="full-charge" onchange="call('power.set_charge_mode',{mode:this.checked?'full':'storage'})"> 완충 모드</label></div>
+</section>
+
+<!-- Connection -->
+<section>
+  <h2>연결<span class="sp"></span><button onclick="doPing()">ping</button></h2>
+  <table class="kv" id="conn"></table>
+</section>
+
+<!-- Power -->
+<section>
+  <h2>전원 상태<span class="sp"></span><span data-rt="status" data-streams="status" data-hz="1" data-on="1"></span></h2>
+  <table class="kv" id="status"></table>
+</section>
+
+<!-- Idle -->
+<section>
+  <h2>절전</h2>
+  <div class="chips" id="idle-levels">
+    <button data-level="0">level 0 기본</button>
+    <button data-level="1">level 1 sleepy</button>
+    <button data-level="2">level 2 어둡게</button>
+    <button data-level="3">level 3 절전</button>
+  </div>
+  <table class="kv" id="idle"></table>
+</section>
+
+<!-- Face -->
+<section>
+  <h2>얼굴</h2>
+  <div class="chips" id="expressions"></div>
+  <h3>파라미터</h3>
+  <div id="face-params"></div>
+  <h3>장식</h3>
+  <div class="chips" id="decorators"></div>
+  <h3>자동 움직임</h3>
+  <div class="chips">
+    <label class="chip"><input type="checkbox" id="auto-on" checked onchange="call('face.set_auto',{on:this.checked})"> 켜기</label>
+  </div>
+</section>
+
+<!-- Display -->
+<section>
+  <h2>화면<span class="sp"></span><button onclick="capture()">캡처</button></h2>
+  <canvas id="screen" width="320" height="240"></canvas>
+  <div class="row"><label>밝기</label><input type="range" id="bright" min="0" max="255" value="128"><span class="val" id="bright-v">128</span></div>
+  <div class="row"><label>화면</label>
+    <button onclick="call('display.power',{on:true})">켜기</button>
+    <button onclick="call('display.power',{on:false})">끄기</button></div>
+</section>
+
+<!-- Modal -->
+<section>
+  <h2>모달 메시지<span class="sp"></span><button onclick="call('modal.get').then(r=>setText('modal-out', r))">읽기</button></h2>
+  <div class="row"><label>제목</label><input type="text" id="m-title" value="안녕하세요" style="flex:1"></div>
+  <div class="row"><label>본문</label><textarea id="m-body" rows="2">StackChan 대시보드에서 보낸 메시지입니다.</textarea></div>
+  <div class="row"><label>버튼</label>
+    <select id="m-buttons"><option value="none">없음</option><option value="ok" selected>OK</option><option value="yes_no">Yes / No</option></select>
+    타임아웃 <input type="number" id="m-timeout" value="0" min="0" max="3600000" step="1000"> ms</div>
+  <div class="row">
+    <button class="primary" onclick="showModal()">표시</button>
+    <button onclick="call('modal.close')">닫기</button>
+    <span class="muted">0 = 계속 표시. 누른 결과가 아래에 표시됩니다.</span></div>
+  <pre class="out" id="modal-out">-</pre>
+</section>
+
+<!-- LEDs -->
+<section>
+  <h2>LED (12개)<span class="sp"></span><button onclick="loadLeds()">읽기</button></h2>
+  <div class="row"><label>색</label><input type="color" id="led-color" value="#ff8000">
+    <button id="led-all-btn" onclick="ledAllToggle()">전체 켜기</button>
+    <button id="led-rainbow-btn" onclick="ledRainbow()">무지개</button></div>
+  <h3>왼쪽 0–5</h3><div class="leds" id="leds-left"></div>
+  <h3>오른쪽 6–11</h3><div class="leds" id="leds-right"></div>
+  <div class="row"><label>밝기</label><input type="range" id="led-bright" min="0" max="100" value="100"><span class="val" id="led-bright-v">100%</span></div>
+</section>
+
+<!-- Servo -->
+<section>
+  <h2>서보<span class="sp"></span><span data-rt="servo" data-streams="servo" data-hz="5"></span>
+    <button onclick="call('servo.get').then(showServo)">읽기</button></h2>
+  <div class="row"><label>전원</label><button id="servo-power-btn" onclick="servoPowerToggle()">-</button>
+    <span class="badge" id="servo-power">-</span></div>
+  <div class="row"><label>yaw</label><input type="range" id="yaw" min="-128" max="128" value="0"><span class="val" id="yaw-v">0°</span></div>
+  <div class="row"><label>pitch</label><input type="range" id="pitch" min="5" max="85" value="5"><span class="val" id="pitch-v">5°</span></div>
+  <div class="row"><label>최저 속도</label><input type="range" id="min-speed" min="10" max="180" value="20"><span class="val" id="min-speed-v">20°/s</span></div>
+  <div class="row"><label>최고 속도</label><input type="range" id="speed" min="10" max="180" value="90"><span class="val" id="speed-v">90°/s</span></div>
+  <div class="row">
+    <button class="primary" onclick="servoMove()">이동</button>
+    <button onclick="servoInitial()">초기 위치로 이동</button>
+    <label class="chip"><input type="checkbox" id="servo-live"> 슬라이더 따라 바로 이동</label></div>
+  <table class="kv" id="servo"></table>
+</section>
+
+<!-- Audio -->
+<section>
+  <h2>오디오<span class="sp"></span><span data-rt="audio" data-streams="audio" data-hz="10" data-on="1"></span></h2>
+  <div class="row"><label>마이크</label><div class="meter"><div id="mic-meter"></div></div><span class="val" id="mic-v">-</span></div>
+  <div class="row"><label>볼륨</label><input type="range" id="volume" min="0" max="100" value="45"><span class="val" id="volume-v">45</span></div>
+  <div class="row"><label>비프</label>
+    <input type="number" id="beep-f" value="880" min="20" max="12000"> Hz
+    <input type="number" id="beep-d" value="250" min="1" max="1000"> ms
+    <select id="beep-w"><option value="sine">사인</option><option value="square">사각</option><option value="triangle">삼각</option><option value="ramp" selected>톱니</option></select>
+    <button class="primary" onclick="call('audio.beep',{freq_hz:num('beep-f'),duration_ms:num('beep-d'),wave:val('beep-w')})">재생</button></div>
+  <div class="row"><label>프리셋</label>
+    <button onclick="melody([[523,120],[659,120],[784,200]])">도미솔</button>
+    <button onclick="melody([[784,120],[659,120],[523,200]])">솔미도</button>
+    <button onclick="melody([[1200,60],[1200,60]])">삑삑</button></div>
+</section>
+
+<!-- Camera -->
+<section>
+  <h2>카메라<span class="sp"></span><span data-poll="snapshot" data-sec="1"></span>
+    <button class="primary" onclick="snapshot()">촬영</button></h2>
+  <img class="frame" id="snap" alt="">
+  <div class="row"><label>해상도</label>
+    <select id="cam-size" onchange="setResolution()"><option value="qqvga">QQVGA 160×120</option><option value="qvga" selected>QVGA 320×240</option><option value="vga">VGA 640×480</option></select></div>
+</section>
+
+<!-- IMU -->
+<section>
+  <h2>IMU · 자세<span class="sp"></span><span data-rt="imu" data-streams="imu" data-hz="20" data-on="1"></span>
+    <button onclick="imuReset()" title="현재 자세를 기준으로 방향(yaw)을 0으로">방향 초기화</button></h2>
+  <canvas id="imu3d" width="360" height="280" style="background:var(--bg)"></canvas>
+  <div class="row muted">
+    <span style="color:var(--x)">■ x</span><span style="color:var(--y)">■ y</span><span style="color:var(--z)">■ z</span>
+    · 기울기 <b id="imu-tilt">-</b> · 상태 <b id="imu-motion">-</b></div>
+  <details><summary>숫자 보기</summary><table class="kv" id="imu"></table></details>
+</section>
+
+<!-- Touch / button / light -->
+<section>
+  <h2>터치 · 버튼 · 빛<span class="sp"></span><span data-rt="touch" data-streams="touch,button,light" data-hz="10" data-on="1"></span></h2>
+  <svg id="touchviz" viewBox="0 0 360 300" width="100%">
+    <text x="10" y="14">머리 (위에서 본 모습)</text>
+    <text x="10" y="40">앞</text><text x="330" y="40">뒤</text>
+    <rect class="seg" id="z-front" x="30" y="22" width="96" height="30" rx="6"/>
+    <rect class="seg" id="z-middle" x="132" y="22" width="96" height="30" rx="6"/>
+    <rect class="seg" id="z-back" x="234" y="22" width="96" height="30" rx="6"/>
+    <text id="z-kind" x="180" y="68" text-anchor="middle"></text>
+    <text x="10" y="92">화면 (320×240)</text>
+    <rect class="frame" x="10" y="100" width="160" height="120" rx="4"/>
+    <g id="scr-marks"></g>
+    <circle id="scr-dot" cx="-20" cy="-20" r="7" class="lit"/>
+    <text x="200" y="92">전원 버튼</text>
+    <circle id="btn-c" cx="230" cy="130" r="22" class="seg"/>
+    <text x="200" y="182">조도</text>
+    <rect class="bar-bg" x="200" y="190" width="150" height="10" rx="3"/>
+    <rect id="lux-bar" class="lit" x="200" y="190" width="0" height="10" rx="3" style="fill:var(--warn)"/>
+    <text id="lux-t" x="350" y="182" text-anchor="end">-</text>
+    <text x="10" y="248">근접</text>
+    <rect class="bar-bg" x="10" y="256" width="340" height="12" rx="3"/>
+    <rect id="prox-bar" class="lit" x="10" y="256" width="0" height="12" rx="3"/>
+    <line x1="51.5" x2="51.5" y1="252" y2="272" stroke="var(--muted)" stroke-dasharray="2 2"/>
+    <line x1="76.4" x2="76.4" y1="252" y2="272" stroke="var(--muted)" stroke-dasharray="2 2"/>
+    <text id="prox-t" x="350" y="290" text-anchor="end">-</text>
+    <text x="10" y="290">점선: far 250 / near 400</text>
+  </svg>
+  <details><summary>숫자 보기</summary><table class="kv" id="touch"></table><table class="kv" id="light"></table></details>
+</section>
+
+<!-- Time -->
+<section>
+  <h2>시계 (RTC, UTC)<span class="sp"></span><button onclick="loadTime()">읽기</button></h2>
+  <table class="kv" id="time"></table>
+  <div class="row">
+    <button class="primary" onclick="setTimeNow()">브라우저 시간과 동기화</button></div>
+  <div class="row">
+    <input type="text" id="time-iso" placeholder="2026-11-13T12:00:00">
+    <button onclick="call('time.set',{iso:val('time-iso')}).then(loadTime)">직접 설정</button></div>
+</section>
+
+<!-- Events -->
+<section class="wide">
+  <h2>이벤트<span class="sp"></span>
+    <button onclick="setSubs(EVENTS)">모두 구독</button>
+    <button onclick="setSubs([])">모두 해제</button>
+    <button onclick="clearLog('events-log')">지우기</button></h2>
+  <div class="chips" id="subs"></div>
+  <div class="log" id="events-log" style="margin-top:8px"></div>
+</section>
+
+<!-- Logs -->
+<section class="wide">
+  <h2>기기 로그<span class="sp"></span>
+    레벨 <select id="log-level"><option>E</option><option>W</option><option selected>I</option><option>D</option><option>V</option><option>none</option></select>
+    <button onclick="call('log.set_level',{level:val('log-level')})">적용</button>
+    전원 로그 <input type="number" id="pwr-int" value="0" min="0" max="86400"> 초
+    <button onclick="call('log.set_power_interval',{interval_s:num('pwr-int')})">적용</button>
+    <button onclick="clearLog('logs')">지우기</button></h2>
+  <div class="log" id="logs"></div>
+</section>
+
+<!-- RPC trace -->
+<section class="wide">
+  <h2>RPC 기록<span class="sp"></span>
+    <label class="stream"><input type="checkbox" id="trace-on" checked> 기록</label>
+    <label class="stream"><input type="checkbox" id="trace-ntf"> 알림(notify.*)도 표시</label>
+    <button onclick="clearLog('trace')">지우기</button></h2>
+  <div class="log" id="trace"></div>
+  <div class="muted">Pi의 서버가 기기와 실제로 주고받은 JSON-RPC입니다 (→ 보냄, ← 받음). 다른 브라우저에서 보낸 것도 보입니다. 긴 값(이미지 base64)은 줄여서 표시합니다.</div>
+</section>
+
+<!-- RPC console -->
+<section class="wide">
+  <h2>RPC 콘솔<span class="sp"></span><span class="muted">모든 메서드를 직접 호출할 수 있습니다 (디버그 i2c.* 포함)</span></h2>
+  <div class="row">
+    <input type="text" id="rpc-method" list="rpc-methods" placeholder="method" value="sys.info" style="width:220px">
+    <datalist id="rpc-methods"></datalist>
+    <input type="text" id="rpc-params" placeholder='params JSON, 예: {"yaw":10}' style="flex:1">
+    timeout <input type="number" id="rpc-timeout" value="5" min="1" max="30"> s
+    <button class="primary" onclick="rpcConsole()">호출</button></div>
+  <pre class="out" id="rpc-out">-</pre>
+</section>
+
+</main>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const EVENTS = ['touch.head','touch.screen','button','motion','proximity','power.usb','power.charge','power.low_battery','servo.fault','modal.result'];
+const EXPRESSIONS = ['neutral','happy','unhappy','angry','sad','sleepy'];
+const DECORATORS = ['heart','angry','sweat','shy','question'];
+// key, label, min, max, step, default (firmware defaults)
+const FACE_PARAMS = [
+  ['eye_x', '시선 좌우', -1, 1, 0.05, 0], ['eye_y', '시선 상하', -1, 1, 0.05, 0],
+  ['eye_open', '눈 뜸', 0, 1, 0.05, 1], ['mouth_open', '입 벌림', 0, 1, 0.05, 0],
+  ['mouth_rot', '입 회전', -45, 45, 1, 0], ['mouth_size', '입 크기', 0.25, 2, 0.05, 0.5],
+];
+const SERVO_INITIAL = {yaw: 0, pitch: 5};
+
+const $ = id => document.getElementById(id);
+const val = id => $(id).value;
+const num = id => Number($(id).value);
+const ignore = () => {};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- RPC ----------
+const stats = {ok: 0, fail: 0, lost: 0, lastSeq: null, ping: null, server: false, device: false, lastMsg: null};
+function toast(msg, info) {
+  const d = document.createElement('div');
+  d.textContent = msg; if (info) d.className = 'info';
+  $('toast').appendChild(d); setTimeout(() => d.remove(), 4000);
+}
+async function call(method, params, timeout = 5, quiet = false) {
+  let j;
+  try {
+    const r = await fetch('/api/call', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify({method, params, timeout})});
+    j = await r.json();
+  } catch (e) { j = {error: {code: 0, message: '서버에 연결할 수 없음'}}; }
+  if (j.error) {
+    stats.fail++;
+    if (!quiet) toast(`${method}: ${j.error.message} (${j.error.code})`);
+    throw j.error;
+  }
+  stats.ok++;
+  return j.result;
+}
+function throttle(fn, ms) {
+  let last = 0, timer = null, args;
+  return (...a) => {
+    args = a; const now = Date.now();
+    if (now - last >= ms) { last = now; fn(...args); }
+    else if (!timer) timer = setTimeout(() => { timer = null; last = Date.now(); fn(...args); }, ms - (now - last));
+  };
+}
+// Two-step button: the first click arms it for 3 s, the second runs the action
+function armButton(btn, label, action) {
+  const original = btn.textContent; let timer = null;
+  btn.onclick = () => {
+    if (!btn.classList.contains('armed')) {
+      btn.classList.add('armed'); btn.textContent = `한 번 더 누르면 ${label}`;
+      timer = setTimeout(() => { btn.classList.remove('armed'); btn.textContent = original; }, 3000);
+      return;
+    }
+    clearTimeout(timer); btn.classList.remove('armed'); btn.textContent = original;
+    action();
+  };
+}
+
+// ---------- helpers ----------
+function setKv(id, obj, labels = {}) {
+  const t = $(id); t.innerHTML = '';
+  if (obj == null) { t.innerHTML = '<tr><td>-</td><td>null</td></tr>'; return; }
+  for (const [k, v] of Object.entries(obj)) {
+    if (['seq', 'ts_ms', 'name'].includes(k)) continue;
+    const tr = t.insertRow();
+    tr.insertCell().textContent = labels[k] || k;
+    const cell = tr.insertCell();
+    if (v && v.html !== undefined) cell.innerHTML = v.html;
+    else cell.textContent = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+  }
+}
+function setText(id, v) { $(id).textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
+function fmtUptime(ms) {
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function rgbCss(c) { return `rgb(${c[0]},${c[1]},${c[2]})`; }
+function hsvToRgb(h, s, v) {
+  const f = n => { const k = (n + h / 60) % 6; return Math.round(255 * (v - v * s * Math.max(0, Math.min(k, 4 - k, 1)))); };
+  return [f(5), f(3), f(1)];
+}
+const v3 = (a, d = 2) => a.map(x => x == null ? '-' : Number(x).toFixed(d)).join(' / ');
+function appendLog(id, html, cls) {
+  const box = $(id), stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  const d = document.createElement('div'); d.innerHTML = html; if (cls) d.className = cls;
+  box.appendChild(d);
+  while (box.childElementCount > 500) box.firstChild.remove();
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+function clearLog(id) { $(id).innerHTML = ''; }
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+const now = () => new Date().toLocaleTimeString('ko-KR', {hour12: false});
+function bindRange(id, fmt, send) {
+  const el = $(id), out = $(id + '-v');
+  const t = send ? throttle(send, 120) : null;
+  el.addEventListener('input', () => { out.textContent = fmt(el.value); if (t) t(Number(el.value)); });
+  if (send) el.addEventListener('change', () => send(Number(el.value)));
+}
+function setRange(id, v, fmt = x => x) { $(id).value = v; $(id + '-v').textContent = fmt(v); }
+
+// ---------- streams (device) and polling (dashboard) ----------
+const RT = {};
+function buildRealtime() {
+  for (const el of document.querySelectorAll('[data-rt]')) {
+    const key = el.dataset.rt;
+    el.className = 'stream';
+    el.innerHTML = `<label><input type="checkbox"${el.dataset.on ? ' checked' : ''}> 스트림</label>` +
+                   `<input type="number" min="1" max="100" value="${el.dataset.hz}">Hz`;
+    const [box, rate] = el.querySelectorAll('input');
+    RT[key] = {streams: el.dataset.streams.split(','), box, rate};
+    box.onchange = rate.onchange = () => applyRealtime(key);
+  }
+  for (const el of document.querySelectorAll('[data-poll]')) {
+    const fn = {snapshot}[el.dataset.poll];
+    el.className = 'stream';
+    el.innerHTML = `<label><input type="checkbox"> 자동</label><input type="number" min="1" max="60" value="${el.dataset.sec}">초`;
+    const [box, sec] = el.querySelectorAll('input');
+    let timer = null;
+    const loop = async () => {
+      timer = null;
+      if (!box.checked) return;
+      await fn();
+      if (box.checked) timer = setTimeout(loop, Number(sec.value) * 1000);
+    };
+    box.onchange = () => { if (box.checked && !timer) loop(); };
+    el.stop = () => { box.checked = false; };
+  }
+}
+async function applyRealtime(key) {
+  const r = RT[key];
+  for (const name of r.streams) {
+    try {
+      if (r.box.checked) await call('stream.start', {name, rate_hz: Number(r.rate.value)});
+      else await call('stream.stop', {name});
+    } catch (e) { r.box.checked = false; }
+  }
+}
+const STREAM_HANDLERS = {status: showStatus, imu: onImu, light: showLight, servo: showServo, audio: showAudio,
+                         touch: showTouch, button: showButton};
+
+// ---------- system / connection ----------
+async function loadInfo() {
+  const info = await call('sys.info');
+  setKv('info', info, {fw_version: '펌웨어', build_date: '빌드', mac: 'MAC'});
+  const methods = await call('rpc.list');
+  $('rpc-methods').innerHTML = methods.map(m => `<option value="${m}">`).join('');
+}
+async function doPing() {
+  if (!stats.device) return;
+  const t = performance.now();
+  try { await call('sys.ping', null, 3, true); stats.ping = performance.now() - t; } catch (e) { stats.ping = null; }
+  showConn();
+}
+function showConn() {
+  const yes = b => b ? '<span class="dot on"></span>연결됨' : '<span class="dot"></span>끊김';
+  setKv('conn', {
+    '브라우저 ↔ Pi 서버': {html: yes(stats.server)},
+    'Pi ↔ StackChan (USB 시리얼)': {html: yes(stats.device)},
+    'ping (왕복)': stats.ping == null ? '-' : `${stats.ping.toFixed(0)} ms`,
+    'RPC 성공 / 실패': `${stats.ok} / ${stats.fail}`,
+    '이벤트 유실': stats.lost,
+    '마지막 수신': stats.lastMsg ? stats.lastMsg.toLocaleTimeString('ko-KR', {hour12: false}) : '-',
+  });
+  const ok = stats.server && stats.device;
+  $('conn-dot').classList.toggle('on', ok);
+  $('conn-text').textContent = !stats.server ? '서버 연결 끊김' : stats.device ? '연결됨' : '기기 연결 끊김';
+}
+function fmtBytes(b) {
+  return b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : b >= 1024 ? `${(b / 1024).toFixed(0)} KB` : `${b} B`;
+}
+function showStatus(s) {
+  const unit = (v, u, d = 0) => v == null ? '-' : `${Number(v).toFixed(d)} ${u}`;
+  setKv('status', {
+    '배터리': `${s.batt_pct}%`, '배터리 전압': unit(s.batt_mv / 1000, 'V', 2), '배터리 전류': unit(s.batt_ma, 'mA'),
+    '충전 중': s.charging ? '예' : '아니오', '충전 상태': s.charge_state,
+    '충전 모드': s.charge_mode === 'full' ? '완충' : `보관 (충전기 ${s.charger_on ? '켜짐' : '꺼짐'})`,
+    'USB 전원 (VBUS)': s.vbus ? '연결' : '없음', 'USB 전압': unit(s.vbus_mv / 1000, 'V', 2),
+    '가동 시간': fmtUptime(s.uptime_ms), '칩 온도': unit(s.chip_temp_c, '°C', 1), 'PMIC 온도': unit(s.pmic_temp_c, '°C', 1),
+    '여유 메모리': fmtBytes(s.free_heap)});
+  $('full-charge').checked = s.charge_mode === 'full';
+  if (s.idle_s !== undefined) showIdle(s.idle_s, s.idle_level);
+}
+
+// ---------- idle ----------
+const IDLE_START_S = [0, 600, 1800, 3600];
+let idleBase = null;  // {idle_s, level, at}
+const fmtMs = sec => `${Math.floor(sec / 60)}분 ${String(Math.floor(sec % 60)).padStart(2, '0')}초`;
+function showIdle(idle_s, level) {
+  idleBase = {idle_s, level, at: performance.now()};
+  renderIdle();
+}
+function renderIdle() {
+  if (!idleBase) return;
+  const idle = idleBase.idle_s + (performance.now() - idleBase.at) / 1000, level = idleBase.level;
+  for (const b of $('idle-levels').children) b.classList.toggle('sel', Number(b.dataset.level) === level);
+  setKv('idle', {'무활동 시간': fmtMs(idle),
+    '다음 단계까지': level < 3 ? `${fmtMs(Math.max(0, IDLE_START_S[level + 1] - idle))} (level ${level + 1})` : '-'});
+}
+async function setIdleLevel(level) {
+  const r = await call('idle.set_level', {level});
+  showIdle(r.idle_s, r.level);
+}
+
+// ---------- face ----------
+function buildFace() {
+  $('expressions').innerHTML = EXPRESSIONS.map(e => `<button data-expr="${e}">${e}</button>`).join('');
+  $('expressions').onclick = e => {
+    const name = e.target.dataset.expr; if (!name) return;
+    call('face.set_expression', {name}).then(() => markExpr(name));
+  };
+  $('face-params').innerHTML = FACE_PARAMS.map(([k, label, min, max, step, def]) =>
+    `<div class="row"><label>${label}</label><input type="range" id="fp-${k}" min="${min}" max="${max}" step="${step}" value="${def}">` +
+    `<span class="val" id="fp-${k}-v">${def}</span></div>`).join('') +
+    '<div class="row"><button onclick="resetFaceParams()">파라미터 초기화</button></div>';
+  for (const [k] of FACE_PARAMS) bindRange('fp-' + k, v => v, v => call('face.set_params', {[k]: v}));
+  $('decorators').innerHTML = DECORATORS.map(d =>
+    `<label class="chip"><input type="checkbox" id="dec-${d}"> ${d}</label>`).join('');
+  for (const d of DECORATORS) $('dec-' + d).onchange = e => call('face.set_decorator', {name: d, on: e.target.checked});
+}
+function markExpr(name) { for (const b of $('expressions').children) b.classList.toggle('sel', b.dataset.expr === name); }
+const faceDefaults = () => Object.fromEntries(FACE_PARAMS.map(p => [p[0], p[5]]));
+function resetFaceParams() { call('face.set_params', faceDefaults()).then(loadFace); }
+async function loadFace() {
+  const f = await call('face.get');
+  markExpr(f.expression);
+  for (const [k] of FACE_PARAMS) if (f.params[k] !== undefined) setRange('fp-' + k, Math.round(f.params[k] * 100) / 100);
+  for (const d of DECORATORS) $('dec-' + d).checked = f.decorators.includes(d);
+  $('auto-on').checked = !!(f.auto.blink && f.auto.gaze && f.auto.react);
+}
+
+// ---------- display / modal ----------
+let capturing = false;
+async function capture() {
+  if (capturing) return; capturing = true;
+  try {
+    const f = await call('display.capture', null, 10);
+    const bin = atob(f.data), cv = $('screen'), img = cv.getContext('2d').createImageData(f.width, f.height);
+    for (let i = 0, p = 0; i < bin.length; i += 2, p += 4) {
+      const v = (bin.charCodeAt(i) << 8) | bin.charCodeAt(i + 1);
+      const r = (v >> 11) & 31, g = (v >> 5) & 63, b = v & 31;
+      img.data[p] = (r << 3) | (r >> 2); img.data[p + 1] = (g << 2) | (g >> 4); img.data[p + 2] = (b << 3) | (b >> 2); img.data[p + 3] = 255;
+    }
+    cv.width = f.width; cv.height = f.height;
+    cv.getContext('2d').putImageData(img, 0, 0);
+  } catch (e) { /* toast shown */ }
+  finally { capturing = false; }
+}
+function showModal() {
+  const p = {buttons: val('m-buttons'), timeout_ms: num('m-timeout')};
+  if (val('m-title')) p.title = val('m-title');
+  if (val('m-body')) p.body = val('m-body');
+  call('modal.show', p).then(() => call('modal.get')).then(r => setText('modal-out', r));
+}
+
+// ---------- LEDs ----------
+let ledColors = Array.from({length: 12}, () => [0, 0, 0]), ledEffect = 'none';
+const ledOn = c => c[0] + c[1] + c[2] > 0;
+function buildLeds() {
+  const make = i => `<div class="led"><button id="led-${i}" title="LED ${i}"></button>${i}</div>`;
+  $('leds-left').innerHTML = [0, 1, 2, 3, 4, 5].map(make).join('');
+  $('leds-right').innerHTML = [6, 7, 8, 9, 10, 11].map(make).join('');
+  for (let i = 0; i < 12; i++) $('led-' + i).onclick = () => {
+    const c = ledOn(ledColors[i]) ? [0, 0, 0] : hexToRgb(val('led-color'));
+    call('led.set_one', {index: i, color: c}).then(() => { stopEffect(); ledColors[i] = c; paintLeds(); });
+  };
+}
+function paintLeds() {
+  for (let i = 0; i < 12; i++) {
+    const b = $('led-' + i), c = ledColors[i], on = ledOn(c);
+    b.style.background = on ? rgbCss(c) : '#000';
+    b.style.setProperty('--glow', rgbCss(c));
+    b.classList.toggle('on', on);
+  }
+  $('led-all-btn').textContent = ledColors.some(ledOn) ? '전체 끄기' : '전체 켜기';
+  $('led-rainbow-btn').classList.toggle('sel', ledEffect === 'rainbow');
+  $('led-rainbow-btn').textContent = ledEffect === 'rainbow' ? '무지개 멈춤' : '무지개';
+}
+// Firmware rainbow: hue gradient over the 12 LEDs, rotating (set_* stops it)
+const RAINBOW_MS = 3000;
+let rainbowTimer = null;
+function rainbowFrame() {
+  const phase = (performance.now() % RAINBOW_MS) / RAINBOW_MS * 360;
+  ledColors = ledColors.map((_, i) => hsvToRgb((phase + i * 30) % 360, 1, 1));
+  paintLeds();
+}
+function stopEffect() { ledEffect = 'none'; clearInterval(rainbowTimer); rainbowTimer = null; }
+function showEffect(name) {
+  if (name === 'rainbow') { ledEffect = 'rainbow'; if (!rainbowTimer) rainbowTimer = setInterval(rainbowFrame, 100); }
+  else stopEffect();
+  paintLeds();
+}
+async function loadLeds() {
+  const r = await call('led.get');
+  ledColors = r.colors; showEffect(r.effect);
+  setRange('led-bright', r.brightness, v => v + '%');
+}
+function ledAllToggle() {
+  const c = ledColors.some(ledOn) ? [0, 0, 0] : hexToRgb(val('led-color'));
+  call('led.set_all', {color: c}).then(() => { stopEffect(); ledColors = ledColors.map(() => c); paintLeds(); });
+}
+function ledRainbow() {
+  if (ledEffect === 'rainbow') {
+    call('led.set_effect', {name: 'none'}).then(() => { stopEffect(); paintLeds(); });
+  } else {
+    call('led.set_effect', {name: 'rainbow', period_ms: RAINBOW_MS}).then(() => showEffect('rainbow'));
+  }
+}
+
+// ---------- servo ----------
+let servoPowered = false;
+function servoMove(only) {
+  const p = servoSpeeds();
+  if (!only || only === 'yaw') p.yaw = num('yaw');
+  if (!only || only === 'pitch') p.pitch = num('pitch');
+  return call('servo.move', p);
+}
+// start / end speed and cruise speed (the device starts at min_speed, speeds up to speed, slows down to min_speed)
+const servoSpeeds = () => ({min_speed: Math.min(num('min-speed'), num('speed')), speed: num('speed')});
+function servoInitial() {
+  call('servo.home', servoSpeeds()).then(() => {
+    setRange('yaw', SERVO_INITIAL.yaw, v => v + '°'); setRange('pitch', SERVO_INITIAL.pitch, v => v + '°');
+  });
+}
+function servoPowerToggle() {
+  call('servo.power', {on: !servoPowered}).finally(() => call('servo.get', null, 5, true).then(showServo, ignore));
+}
+function showServo(s) {
+  const rows = {};
+  for (const ax of ['yaw', 'pitch']) {
+    const a = s[ax]; if (!a) continue;
+    rows[`${ax} 각도 / 목표`] = `${a.angle ?? '-'}° / ${a.target}°`;
+    if (a.temp_c !== undefined) rows[`${ax} 온도 · 전압 · 부하`] = `${a.temp_c}°C · ${a.volt_mv}mV · ${a.load}`;
+  }
+  setKv('servo', rows);
+  servoPowered = !!(s.yaw && s.yaw.powered);
+  $('servo-power').textContent = servoPowered ? '켜짐 (힘 유지)' : '꺼짐 (힘 풀림)';
+  $('servo-power').className = 'badge ' + (servoPowered ? 'ok' : 'bad');
+  $('servo-power-btn').textContent = servoPowered ? '서보 끄기' : '서보 켜기';
+  $('servo-power-btn').className = servoPowered ? '' : 'primary';
+}
+
+// ---------- audio ----------
+function showAudio(a) {
+  const pct = Math.max(0, Math.min(100, (a.level_dbfs + 80) / 80 * 100));
+  $('mic-meter').style.width = pct + '%';
+  $('mic-v').textContent = `${a.level_dbfs} dB`;
+  if (document.activeElement !== $('volume')) setRange('volume', a.volume);
+}
+async function melody(notes) {
+  for (const [f, d] of notes) {
+    await call('audio.beep', {freq_hz: f, duration_ms: d, wave: val('beep-w')}).catch(ignore);
+    await sleep(d + 20);
+  }
+}
+
+// ---------- camera ----------
+let snapping = false;
+async function snapshot() {
+  if (snapping) return; snapping = true;
+  try {
+    const r = await call('camera.snapshot', null, 10);
+    $('snap').src = 'data:image/jpeg;base64,' + r.jpeg;
+    $('snap').style.width = r.width + 'px';
+  } catch (e) { document.querySelector('[data-poll=snapshot]').stop(); }
+  finally { snapping = false; }
+}
+async function setResolution() {
+  await call('camera.set_resolution', {size: val('cam-size')}, 10);
+  await snapshot();
+}
+
+// ---------- IMU: orientation (complementary filter) and 3D view ----------
+let q = null, lastImuTs = null, lastImu = null;
+const qmul = (a, b) => [a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3], a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],
+                        a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1], a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];
+const qnorm = a => { const n = Math.hypot(...a) || 1; return a.map(x => x / n); };
+const qaxis = (ax, ang) => { const n = Math.hypot(...ax); if (n < 1e-9) return [1, 0, 0, 0];
+  const s = Math.sin(ang / 2) / n; return [Math.cos(ang / 2), ax[0] * s, ax[1] * s, ax[2] * s]; };
+const qrot = (a, v) => qmul(qmul(a, [0, ...v]), [a[0], -a[1], -a[2], -a[3]]).slice(1);
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+function tiltTo(v) {  // rotation taking unit v onto world up (0, 0, 1)
+  return qaxis(cross(v, [0, 0, 1]), Math.acos(Math.max(-1, Math.min(1, v[2]))));
+}
+function imuReset() { q = null; }
+function onImu(r) {
+  lastImu = r; showImuNumbers(r);
+  const a = [r.ax, r.ay, r.az], an = Math.hypot(...a);
+  if (an < 0.05) return;
+  const up = a.map(x => x / an);
+  if (q === null) { q = tiltTo(up); lastImuTs = r.ts_ms; draw3d(); return; }
+  const dt = r.ts_ms != null && lastImuTs != null ? Math.min(0.5, Math.max(0, (r.ts_ms - lastImuTs) / 1000)) : 0;
+  lastImuTs = r.ts_ms;
+  const w = [r.gx, r.gy, r.gz].map(x => x * Math.PI / 180);
+  q = qnorm(qmul(q, qaxis(w, Math.hypot(...w) * dt)));        // gyro, body frame
+  if (Math.abs(an - 1) < 0.3) {                                  // accel correction when not accelerating hard
+    const v = qrot(q, up), corr = tiltTo(v);
+    const ang = 2 * Math.acos(Math.max(-1, Math.min(1, corr[0])));
+    q = qnorm(qmul(qaxis(corr.slice(1), ang * 0.08), q));
+  }
+  draw3d();
+}
+function showImuNumbers(r) {
+  $('imu-tilt').textContent = r.tilt_deg != null ? `${Number(r.tilt_deg).toFixed(1)}°` : '-';
+  $('imu-motion').textContent = r.motion ?? '-';
+  setKv('imu', {'가속 x / y / z (g)': v3([r.ax, r.ay, r.az], 3), '자이로 x / y / z (°/s)': v3([r.gx, r.gy, r.gz], 1),
+                '지자기 x / y / z (µT)': v3([r.mx, r.my, r.mz], 1), '기울기 (°)': r.tilt_deg, '보드 온도 (°C, IMU)': r.temp_c, '상태': r.motion});
+}
+function draw3d() {
+  const cv = $('imu3d'), g = cv.getContext('2d'), W = cv.width, H = cv.height, S = 95;
+  const css = getComputedStyle(document.documentElement), col = n => css.getPropertyValue(n).trim();
+  const az = -0.6, el = 0.45;  // view: azimuth, elevation (rad)
+  const proj = p => {
+    const X = p[0] * Math.cos(az) - p[1] * Math.sin(az), Y = p[0] * Math.sin(az) + p[1] * Math.cos(az);
+    return [W / 2 + X * S, H / 2 + 20 - (p[2] * Math.cos(el) + Y * Math.sin(el)) * S, Y * Math.cos(el) - p[2] * Math.sin(el)];
+  };
+  g.clearRect(0, 0, W, H);
+  // ground grid
+  g.strokeStyle = col('--line'); g.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    for (const [a, b] of [[[i * .5, -1, -1.1], [i * .5, 1, -1.1]], [[-1, i * .5, -1.1], [1, i * .5, -1.1]]]) {
+      const pa = proj(a), pb = proj(b); g.beginPath(); g.moveTo(pa[0], pa[1]); g.lineTo(pb[0], pb[1]); g.stroke();
+    }
+  }
+  if (!q) return;
+  const R = v => qrot(q, v);
+  // body cube along the sensor axes: +y up, screen (face) on +z. Back faces, axes, then front faces.
+  const h = 1 / 3, faces = [];
+  for (let k = 0; k < 3; k++) for (const sg of [-1, 1]) {
+    const n = [0, 0, 0]; n[k] = sg;
+    const u = [0, 0, 0], v = [0, 0, 0]; u[(k + 1) % 3] = 1; v[(k + 2) % 3] = 1;
+    const pt = (a, b) => R([0, 1, 2].map(i => n[i] * h + (u[i] * a + v[i] * b) * h));
+    const c = proj(R(n.map(x => x * h))), front = c[2] - proj([0, 0, 0])[2] < 0;
+    faces.push({k, sg, front, poly: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => proj(pt(a, b)))});
+  }
+  const drawFace = f => {
+    g.beginPath(); f.poly.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath();
+    g.globalAlpha = f.front ? .55 : .25; g.fillStyle = col('--card'); g.fill(); g.globalAlpha = 1;
+    g.strokeStyle = col('--muted'); g.lineWidth = 1.2; g.stroke();
+    if (f.k === 2 && f.sg === 1 && f.front) drawSmile();
+  };
+  const drawSmile = () => {  // device face layout on the +z (screen) face, +y up: two eye dots and a mouth line
+    const P = (x, y) => proj(R([x, y, h])), O = P(0, 0), U = P(1, 0), V = P(0, 1);
+    const k = h * .94 / 160, ux = (U[0] - O[0]) * k, uy = (U[1] - O[1]) * k, vx = (V[0] - O[0]) * k, vy = (V[1] - O[1]) * k;
+    g.save();  // from here on, units are device screen pixels (320x240, y down), as in face.cpp
+    g.setTransform(ux, uy, -vx, -vy, O[0] - 160 * ux + 120 * vx, O[1] - 160 * uy + 120 * vy);
+    g.fillStyle = col('--text');
+    for (const cx of [100, 220]) { g.beginPath(); g.arc(cx, 105, 8, 0, 2 * Math.PI); g.fill(); }  // kEyeRadius * kEyeSize
+    const t = Math.max(3.5, 1.5 / Math.hypot(ux, uy));  // at least 1.5 canvas px thick, so it stays visible
+    g.beginPath(); g.roundRect(160 - 14, 165 - t / 2, 28, t, t / 2); g.fill();                     // 56 * mouth_size 0.5
+    g.restore();
+  };
+  faces.filter(f => !f.front).forEach(drawFace);
+  // axes, far ones first
+  const o = proj([0, 0, 0]);
+  const axes = [['x', [1, 0, 0], col('--x')], ['y', [0, 1, 0], col('--y')], ['z', [0, 0, 1], col('--z')]]
+    .map(([n, v, c]) => ({n, c, p: proj(R(v.map(x => x * 1.05)))})).sort((a, b) => b.p[2] - a.p[2]);
+  for (const {n, c, p} of axes) {
+    g.strokeStyle = g.fillStyle = c; g.lineWidth = 3.5;
+    g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(p[0], p[1]); g.stroke();
+    const ang = Math.atan2(p[1] - o[1], p[0] - o[0]), h = 12;
+    g.beginPath(); g.moveTo(p[0] + Math.cos(ang) * 4, p[1] + Math.sin(ang) * 4);
+    g.lineTo(p[0] - h * Math.cos(ang - .4), p[1] - h * Math.sin(ang - .4));
+    g.lineTo(p[0] - h * Math.cos(ang + .4), p[1] - h * Math.sin(ang + .4)); g.closePath(); g.fill();
+    g.font = 'bold 14px system-ui'; g.fillText(n, p[0] + Math.cos(ang) * 12 - 4, p[1] + Math.sin(ang) * 12 + 5);
+  }
+  faces.filter(f => f.front).forEach(drawFace);
+}
+
+// ---------- touch / button / light ----------
+function showTouch(t) {
+  for (const [i, z] of ['front', 'middle', 'back'].entries()) {
+    const lv = t.head.level[i];
+    $('z-' + z).style.fill = lv ? `color-mix(in srgb, var(--accent) ${30 + lv * 23}%, transparent)` : '';
+  }
+  const dot = $('scr-dot');
+  if (t.screen.pressed) { dot.setAttribute('cx', 10 + t.screen.x / 2); dot.setAttribute('cy', 100 + t.screen.y / 2); }
+  else { dot.setAttribute('cx', -20); dot.setAttribute('cy', -20); }
+  setKv('touch', {'머리 front / middle / back 레벨': t.head.level.join(' / '),
+    '화면': t.screen.pressed ? `눌림 (${t.screen.x}, ${t.screen.y})` : '-', '터치 이벤트 수': t.count});
+}
+function showButton(b) {
+  $('btn-c').style.fill = b.pressed ? 'var(--accent)' : '';
+}
+function showLight(r) {
+  const lux = Number(r.lux) || 0;
+  $('lux-bar').setAttribute('width', 150 * Math.min(1, Math.log10(lux + 1) / 4));
+  $('lux-t').textContent = `${lux} lux`;
+  $('prox-bar').setAttribute('width', 340 * Math.min(1, r.proximity / 2047));
+  $('prox-bar').style.fill = r.near ? 'var(--bad)' : '';
+  $('prox-t').textContent = `${r.proximity}${r.near ? ' · 가까움' : ''}`;
+  setKv('light', {'조도 (lux)': r.lux, '근접 (0–2047)': r.proximity, '가까움': r.near});
+}
+function touchMark(x, y, kind) {
+  const ns = 'http://www.w3.org/2000/svg', c = document.createElementNS(ns, 'circle');
+  c.setAttribute('cx', 10 + x / 2); c.setAttribute('cy', 100 + y / 2); c.setAttribute('r', kind === 'long_press' ? 14 : 9);
+  c.setAttribute('fill', 'none'); c.setAttribute('stroke', 'var(--accent)'); c.setAttribute('stroke-width', 2);
+  c.style.transition = 'opacity 1.2s'; $('scr-marks').appendChild(c);
+  setTimeout(() => { c.style.opacity = 0; }, 50); setTimeout(() => c.remove(), 1400);
+}
+function headKind(zone, kind) {
+  if (kind !== 'tap' && kind !== 'long_press') return;
+  $('z-kind').textContent = `${zone} ${kind}`;
+  setTimeout(() => { if ($('z-kind').textContent === `${zone} ${kind}`) $('z-kind').textContent = ''; }, 1500);
+}
+function buttonFlash() {
+  const c = $('btn-c'); c.style.fill = 'var(--warn)'; setTimeout(() => { c.style.fill = ''; }, 300);
+}
+
+// ---------- time ----------
+function loadTime() { return call('time.get').then(r => setKv('time', r, {iso: '시각 (UTC)', valid: '유효'})); }
+function setTimeNow() { call('time.set', {iso: new Date().toISOString().slice(0, 19)}).then(loadTime); }
+
+// ---------- events / subscriptions ----------
+let wantedSubs = new Set(EVENTS);
+function buildSubs() {
+  $('subs').innerHTML = EVENTS.map(e => `<label class="chip"><input type="checkbox" id="sub-${e}" checked> ${e}</label>`).join('');
+  for (const e of EVENTS) $('sub-' + e).onchange = ev => {
+    ev.target.checked ? wantedSubs.add(e) : wantedSubs.delete(e);
+    call(ev.target.checked ? 'sys.subscribe' : 'sys.unsubscribe', {events: [e]});
+  };
+}
+async function setSubs(list) {
+  wantedSubs = new Set(list);
+  for (const e of EVENTS) $('sub-' + e).checked = wantedSubs.has(e);
+  await call('sys.unsubscribe', {events: EVENTS});
+  if (list.length) await call('sys.subscribe', {events: list});
+}
+function onEvent(p) {
+  const {seq, ts_ms, name, ...rest} = p;
+  if (name === 'boot') stats.lastSeq = null;
+  if (stats.lastSeq != null && seq > stats.lastSeq + 1) stats.lost += seq - stats.lastSeq - 1;
+  stats.lastSeq = seq;
+  appendLog('events-log', `<span class="t">${now()} #${seq}</span> <b>${esc(name)}</b> ${esc(JSON.stringify(rest))}`,
+            name === 'error' || name === 'servo.fault' ? 'E' : '');
+  if (name === 'boot') { toast('기기가 부팅됨: 구독·스트림을 다시 설정합니다', true); setTimeout(refreshAll, 300); }
+  if (name === 'modal.result') setText('modal-out', rest);
+  if (name === 'servo.fault') { toast(`서보 고장: ${rest.servo} ${rest.kind} (전원 차단됨)`); call('servo.get', null, 5, true).then(showServo, ignore); }
+  if (name === 'touch.screen') touchMark(rest.x, rest.y, rest.kind);
+  if (name === 'touch.head') headKind(rest.zone, rest.kind);
+  if (name === 'button') buttonFlash();
+}
+
+// ---------- RPC trace ----------
+const traceSent = new Map();
+function onTrace(r) {
+  if (!$('trace-on').checked) return;
+  const m = r.msg, t = `<span class="t">${now()}</span> `;
+  if (r.dir === 'tx') {
+    if (m.id !== undefined) traceSent.set(m.id, performance.now());
+    appendLog('trace', `${t}→ #${m.id ?? '-'} <b>${esc(m.method)}</b> ${m.params ? esc(JSON.stringify(m.params)) : ''}`, 'tx');
+  } else {
+    const t0 = traceSent.get(m.id); traceSent.delete(m.id);
+    const ms = t0 ? ` (${(performance.now() - t0).toFixed(0)} ms)` : '';
+    const body = m.error ? `error ${JSON.stringify(m.error)}` : JSON.stringify(m.result);
+    appendLog('trace', `${t}← #${m.id}${ms} ${esc(body)}`, m.error ? 'E' : 'rx');
+  }
+}
+function traceNotify(msg) {
+  if (!$('trace-on').checked || !$('trace-ntf').checked) return;
+  appendLog('trace', `<span class="t">${now()}</span> ← ${esc(JSON.stringify(msg))}`, 'ntf');
+}
+
+// ---------- whole-device actions ----------
+async function refreshAll() {
+  try {
+    await call('sys.unsubscribe', {events: EVENTS}, 5, true);
+    if (wantedSubs.size) await call('sys.subscribe', {events: [...wantedSubs]}, 5, true);
+    for (const key in RT) await applyRealtime(key);
+    await loadInfo();
+    call('idle.get', null, 5, true).then(r => showIdle(r.idle_s, r.level), ignore);
+    await Promise.allSettled([loadFace(), loadLeds(), call('servo.get').then(showServo), loadTime(),
+      call('light.get').then(showLight), call('imu.get').then(onImu), call('touch.get').then(showTouch),
+      call('button.get').then(showButton), call('sys.status').then(showStatus), call('audio.get').then(showAudio)]);
+  } catch (e) { /* toast already shown */ }
+}
+async function resetDefaults() {
+  const steps = [
+    ['face.set_expression', {name: 'neutral'}], ['face.set_params', faceDefaults()],
+    ...DECORATORS.map(d => ['face.set_decorator', {name: d, on: false}]),
+    ['face.set_auto', {on: true}], ['modal.close'],
+    ['display.power', {on: true}], ['display.set_brightness', {value: 128}],
+    ['led.set_effect', {name: 'none'}], ['led.set_all', {color: [0, 0, 0]}], ['led.set_brightness', {value: 100}],
+    ['audio.set_volume', {value: 45}], ['camera.set_resolution', {size: 'qvga'}],
+    ['log.set_level', {level: 'I'}], ['log.set_power_interval', {interval_s: 0}],
+  ];
+  for (const [m, p] of steps) await call(m, p, 10).catch(ignore);
+  setRange('bright', 128); $('cam-size').value = 'qvga'; $('log-level').value = 'I'; $('pwr-int').value = 0;
+  await refreshAll();
+  toast('기본값으로 초기화했습니다 (서보 제외)', true);
+}
+
+// ---------- connection ----------
+function connect() {
+  const es = new EventSource('/api/events');
+  es.onopen = () => { stats.server = true; showConn(); };
+  es.onmessage = m => {
+    const msg = JSON.parse(m.data);
+    stats.lastMsg = new Date();
+    if (msg.bridge) {
+      stats.device = msg.bridge.connected; showConn();
+      if (msg.bridge.connected) refreshAll();
+      return;
+    }
+    if (msg.rpc) { onTrace(msg.rpc); return; }
+    traceNotify(msg);
+    if (msg.method === 'notify.event') onEvent(msg.params);
+    else if (msg.method === 'notify.stream') { const h = STREAM_HANDLERS[msg.params.name]; if (h) h(msg.params); }
+    else if (msg.method === 'notify.log') {
+      const p = msg.params;
+      appendLog('logs', `<span class="t">${now()}</span> ${p.level} <b>${esc(p.tag)}</b> ${esc(p.msg)}`, p.level);
+    } else if (msg.raw !== undefined) appendLog('logs', `<span class="t">${now()}</span> ${esc(msg.raw)}`, 'W');
+  };
+  es.onerror = () => { stats.server = false; showConn(); };
+}
+async function rpcConsole() {
+  let params;
+  try { params = val('rpc-params').trim() ? JSON.parse(val('rpc-params')) : undefined; }
+  catch (e) { setText('rpc-out', 'params JSON 오류: ' + e.message); return; }
+  const t = performance.now();
+  try {
+    const r = await call(val('rpc-method'), params, num('rpc-timeout'), true);
+    setText('rpc-out', `// ${(performance.now() - t).toFixed(0)} ms\n` + JSON.stringify(r, null, 2));
+  } catch (e) { setText('rpc-out', 'error ' + JSON.stringify(e)); }
+}
+
+// ---------- init ----------
+function init() {
+  buildFace(); buildLeds(); buildSubs(); buildRealtime(); paintLeds(); draw3d(); showConn();
+  armButton($('btn-reboot'), '재부팅', () => call('sys.reboot').then(() => toast('재부팅합니다', true)));
+  armButton($('btn-poweroff'), '전원 끄기', () => call('sys.power_off').then(() => toast('전원을 끕니다', true)));
+  bindRange('bright', v => v, v => call('display.set_brightness', {value: v}));
+  bindRange('led-bright', v => v + '%', v => call('led.set_brightness', {value: v}));
+  bindRange('volume', v => v, v => call('audio.set_volume', {value: v}));
+  bindRange('yaw', v => v + '°', () => { if ($('servo-live').checked) servoMove('yaw').catch(ignore); });
+  bindRange('pitch', v => v + '°', () => { if ($('servo-live').checked) servoMove('pitch').catch(ignore); });
+  bindRange('speed', v => v + '°/s');
+  bindRange('min-speed', v => v + '°/s');
+  setInterval(doPing, 3000);
+  setInterval(renderIdle, 1000);
+  $('idle-levels').onclick = e => { if (e.target.dataset.level !== undefined) setIdleLevel(Number(e.target.dataset.level)); };
+  connect();
+}
+init();
+</script>
+</body>
+</html>

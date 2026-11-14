@@ -14,6 +14,26 @@ Python client for the StackChan general firmware ([PROTOCOL](../firmwares/genera
 ./pi.sh capture /home/hwanhee/screen.png   # rendered screen as PNG, saved on the Pi
 ```
 
+## Web Dashboard
+
+`stackchan serve` runs a web server on the Pi (standard library only) that bridges a browser to the device:
+
+```sh
+./pi.sh serve                      # from the build PC; Ctrl-C stops it
+# open http://rpi3.local:8080/ (or the Pi's IP) in a browser on the same network
+```
+
+| Item | Description |
+|---|---|
+| Page | Every method, event and stream: status, face, modal, screen capture, LEDs, servos, audio, camera, IMU, touch, light, RTC, event / log viewers, raw RPC console |
+| `POST /api/call` | `{"method", "params", "timeout"}` → `{"result"}` or `{"error": {"code", "message"}}` |
+| `GET /api/events` | Server-Sent Events: device notifications, `{"bridge": {"connected": bool}}`, and `{"rpc": {"dir": "tx"/"rx", "msg"}}` for every request / response exchanged with the device |
+| Options | `--host` (default `0.0.0.0`), `--http-port` (default 8080) |
+
+- The serial port is reopened automatically after it fails; the page re-applies its event subscriptions and streams on connect and on `boot`.
+- No authentication: anyone who can reach the port can control the device (including power off). Use `--host 127.0.0.1` with an SSH tunnel on untrusted networks.
+- The server holds the serial port; stop it before running other `stackchan` commands or `tools/flash.sh`.
+
 ## Tests
 
 | Script | Purpose |
