@@ -1,5 +1,6 @@
 #include "imu.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
@@ -29,6 +30,7 @@ constexpr uint8_t kChipId = 0x00;
 constexpr uint8_t kStatus = 0x03;  // bit2 aux_busy
 constexpr uint8_t kAuxData = 0x04; // aux (8) + acc (6) + gyr (6)
 constexpr uint8_t kInternalStatus = 0x21;
+constexpr uint8_t kTemperature = 0x22;  // int16, 0 = 23 C, 1/512 K per LSB, 0x8000 = invalid
 constexpr uint8_t kAuxDevId = 0x4B;
 constexpr uint8_t kAuxIfConf = 0x4C;
 constexpr uint8_t kAuxRdAddr = 0x4D;
@@ -62,6 +64,7 @@ struct Sample {
     float g[3] = {};
     float m[3] = {};
     float tilt_deg = 0;
+    float temp_c = NAN;
     const char* motion = "still";
 } sample;  // guarded by mutex
 
@@ -74,6 +77,11 @@ bool tilted_sent = false, fallen_sent = false;
 int64_t shake_times[4] = {};
 int shake_index = 0;
 int64_t shake_cooldown_until = 0;
+int64_t nudge_times[3] = {};
+int nudge_index = 0;
+int64_t nudge_cooldown_until = 0;
+int temp_div = 0;
+float temp_c = NAN;
 int lift_count = 0;
 int64_t lift_cooldown_until = 0;
 
@@ -188,6 +196,10 @@ float norm(const float v[3]) {
     return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
+std::atomic<Motion> motion_state{Motion::Still};
+std::atomic<uint32_t> shake_count{0};
+std::atomic<uint32_t> nudge_count{0};
+
 void emitMotion(const char* kind) {
     cJSON* f = cJSON_CreateObject();
     cJSON_AddStringToObject(f, "kind", kind);
@@ -261,9 +273,32 @@ void poll() {
         int64_t oldest = shake_times[shake_index];
         if (oldest != 0 && now - oldest <= 800 && now >= shake_cooldown_until) {
             shake_cooldown_until = now + 1500;
+            shake_count++;
             emitMotion("shaken");
         }
         shaking = true;
+    }
+
+    // Light shake ("nudged"): 3 jolts > 0.3 g within 800 ms, but not a full shake
+    if (norm(jolt) > 0.3f) {
+        nudge_times[nudge_index] = now;
+        nudge_index = (nudge_index + 1) % 3;
+        int64_t oldest = nudge_times[nudge_index];
+        if (oldest != 0 && now - oldest <= 800 && now >= nudge_cooldown_until && now >= shake_cooldown_until) {
+            nudge_cooldown_until = now + 1500;
+            nudge_count++;
+            emitMotion("nudged");
+        }
+    }
+
+    // Board temperature from the BMI270, once a second
+    if (++temp_div >= 1000 / kPollMs) {
+        temp_div = 0;
+        uint8_t tb[2];
+        if (bmi.read(kTemperature, tb, 2) == ESP_OK) {
+            int16_t raw = static_cast<int16_t>(tb[0] | (tb[1] << 8));
+            temp_c = raw == INT16_MIN ? NAN : 23.0f + raw / 512.0f;
+        }
     }
 
     // Lift: upward acceleration along "up" for >= 60 ms while upright
@@ -288,8 +323,13 @@ void poll() {
     memcpy(sample.g, g, sizeof(g));
     memcpy(sample.m, m, sizeof(m));
     sample.tilt_deg = tilt;
+    sample.temp_c = temp_c;
     sample.motion = motion;
     xSemaphoreGive(mutex);
+    motion_state = t == Tilt::Fallen ? Motion::Fallen
+                   : t == Tilt::Tilted ? Motion::Tilted
+                   : (gyro_n > 20 || jolt_n > 0.1f) ? Motion::Moving
+                                                    : Motion::Still;
 }
 
 double round2(float v) {
@@ -321,6 +361,11 @@ bool imuSource(cJSON* obj) {
     }
     cJSON_AddNumberToObject(obj, "tilt_deg", round2(s.tilt_deg));
     cJSON_AddStringToObject(obj, "motion", s.motion);
+    if (std::isnan(s.temp_c)) {
+        cJSON_AddNullToObject(obj, "temp_c");
+    } else {
+        cJSON_AddNumberToObject(obj, "temp_c", roundf(s.temp_c * 10) / 10.0);
+    }
     return true;
 }
 
@@ -359,6 +404,18 @@ void start() {
     }
     poller::add("imu", poll, kPollMs);
     streams::add("imu", imuSource);
+}
+
+Motion motion() {
+    return motion_state;
+}
+
+uint32_t shakeCount() {
+    return shake_count;
+}
+
+uint32_t nudgeCount() {
+    return nudge_count;
 }
 
 }  // namespace imu

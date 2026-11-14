@@ -9,9 +9,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "i2c_bus.h"
+#include "idle.h"
 #include "modal.h"
 #include "poller.h"
 #include "rpc.h"
+#include "streams.h"
 
 namespace touch {
 namespace {
@@ -22,8 +24,9 @@ constexpr int kScreenLongPressMs = 600;
 constexpr int kHeadTapMaxMs = 500;
 constexpr int kHeadLongPressMs = 1000;
 
-// Si12T channel order on the head (channel 0 .. 2)
+// Zones front to back; the Si12T channels run the other way (channel 0 = back), checked on the device
 constexpr const char* kZones[3] = {"front", "middle", "back"};
+constexpr int kZoneChannel[3] = {2, 1, 0};
 
 i2c::Device si12t;
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
@@ -89,6 +92,7 @@ void pollScreen() {
         s.x = x;
         s.y = y;
         if (!s.pressed) {
+            idle::activity();
             s.start_x = x;
             s.start_y = y;
             s.start_ms = now;
@@ -120,7 +124,7 @@ void pollHead() {
     }
     int64_t now = nowMs();
     for (int i = 0; i < 3; i++) {
-        uint8_t level = (out >> (2 * i)) & 0x03;
+        uint8_t level = (out >> (2 * kZoneChannel[i])) & 0x03;
         bool touched = level >= 1;
         xSemaphoreTake(mutex, portMAX_DELAY);
         Zone z = zones[i];
@@ -140,19 +144,21 @@ void pollHead() {
         zones[i] = z;
         xSemaphoreGive(mutex);
 
-        if (started) emitHead(i, "start", now);
+        if (started) {
+            idle::activity();
+            emitHead(i, "start", now);
+        }
         if (send_long) emitHead(i, "long_press", now);
         if (ended) emitHead(i, "end", now);
         if (send_tap) emitHead(i, "tap", now);
     }
 }
 
-cJSON* get(const cJSON*, rpc::Error*) {
+bool touchSource(cJSON* obj) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     Screen s = screen;
     Zone z[3] = {zones[0], zones[1], zones[2]};
     xSemaphoreGive(mutex);
-    cJSON* obj = cJSON_CreateObject();
     cJSON* head = cJSON_AddObjectToObject(obj, "head");
     cJSON* level = cJSON_CreateArray();
     for (int i = 0; i < 3; i++) {
@@ -166,6 +172,12 @@ cJSON* get(const cJSON*, rpc::Error*) {
     cJSON_AddNumberToObject(scr, "y", s.pressed ? s.y : -1);
     cJSON_AddNumberToObject(obj, "count", count.load());
     cJSON_AddNumberToObject(obj, "last_ms", static_cast<double>(last_ms.load()));
+    return true;
+}
+
+cJSON* get(const cJSON*, rpc::Error*) {
+    cJSON* obj = cJSON_CreateObject();
+    touchSource(obj);
     return obj;
 }
 
@@ -208,6 +220,14 @@ void start() {
     if (si12t.isOpen()) {
         poller::add("touch.head", pollHead, 20);
     }
+    streams::add("touch", touchSource);
+}
+
+bool headTouched() {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    bool any = zones[0].touched || zones[1].touched || zones[2].touched;
+    xSemaphoreGive(mutex);
+    return any;
 }
 
 }  // namespace touch

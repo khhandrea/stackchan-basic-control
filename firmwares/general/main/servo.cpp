@@ -10,6 +10,7 @@
 #include "events.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "i2c_bus.h"
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -34,13 +35,23 @@ constexpr uint8_t kInstRead = 0x02, kInstWrite = 0x03;
 
 constexpr float kRawPerDeg = 3.2f;  // 1 raw step = 0.3125 deg (official firmware)
 constexpr int kStepMs = 20;
-constexpr float kDefaultSpeed = 60;  // deg/s
+constexpr float kMinSpeed = 10;          // deg/s, lowest accepted speed
+constexpr float kMaxSpeed = 180;         // deg/s, upper limit for every move
+constexpr float kDefaultMinSpeed = 20;   // deg/s, servo.move / home: start and end speed
+constexpr float kDefaultMaxSpeed = 90;   // deg/s, servo.move / home: cruise speed
+constexpr float kGentleSpeed = 20;       // deg/s, easing back inside the limits and the reaction lift
+constexpr float kAccel = 120;            // deg/s^2, from the start speed up to the cruise speed and back
 
 constexpr int kOverheatC = 65;
 constexpr int kOverloadLoad = 700;   // of 1023
 constexpr int kOverloadSamples = 5;  // x 100 ms
 constexpr float kStallErrorDeg = 5;
 constexpr int kStallMs = 1000;
+constexpr int kBootTimeoutMs = 2000;  // servo answer after VM_EN on
+constexpr int kVmOffMinMs = 1000;     // VM_EN off time before power on, so the servos fully reset
+constexpr int kStableReads = 3;       // consecutive matching readings before trusting the position
+constexpr float kStableDeg = 1.0f;
+constexpr float kPowerOnMarginDeg = 15;  // refuse power on if a reading is this far outside the limits
 
 struct Axis {
     const char* name;
@@ -49,8 +60,10 @@ struct Axis {
     float min_deg, max_deg;
     // motion (guarded by mutex)
     float command = 0;  // last commanded angle
+    float vel = 0;      // deg/s of the commanded angle (signed)
     float target = 0;
-    float speed = kDefaultSpeed;
+    float speed = kGentleSpeed;      // cruise
+    float min_speed = kGentleSpeed;  // start and end
     bool torque = false;
     // feedback
     int overload_count = 0;
@@ -65,8 +78,21 @@ Axis axes[2] = {
 i2c::Device py32;
 bool ready = false;
 std::atomic<bool> powered{false};
+int64_t vm_off_ms = 0;  // when VM_EN was last turned off (0 = unknown, treated as long ago)
+// reactLift state (guarded by mutex)
+constexpr float kLiftDeg = 8;
+bool lifted = false;
+float lift_base = 0, lift_to = 0;
 SemaphoreHandle_t bus_mutex = nullptr;  // UART transactions
 SemaphoreHandle_t mutex = nullptr;      // axis state
+SemaphoreHandle_t power_mutex = nullptr;  // power on / off sequences (RPC and the auto task)
+// Auto power: on at boot and whenever wanted; off while idle (sleepy stage and deeper).
+// servo.power and faults change "wanted"; a failed automatic power-on stops retrying until servo.power on.
+std::atomic<bool> wanted{true};
+std::atomic<bool> idle_off{false};
+std::atomic<bool> auto_failed{false};
+constexpr int kAutoBootDelayMs = 2000;
+constexpr int kAutoPeriodMs = 200;
 
 // ---- SCS protocol ----
 
@@ -183,14 +209,18 @@ void powerOff() {
     for (Axis& a : axes) {
         setTorque(a, false);
         a.torque = false;
+        a.vel = 0;
     }
+    lifted = false;
     xSemaphoreGive(mutex);
     setVmEnable(false);
+    vm_off_ms = esp_timer_get_time() / 1000;
     powered = false;
 }
 
 void fault(const Axis& a, const char* kind) {
     ESP_LOGW(TAG, "%s fault: %s, power cut", a.name, kind);
+    wanted = false;  // stays off until servo.power on
     powerOff();
     cJSON* f = cJSON_CreateObject();
     cJSON_AddStringToObject(f, "servo", a.name);
@@ -204,10 +234,36 @@ void step() {
     if (!powered) return;
     xSemaphoreTake(mutex, portMAX_DELAY);
     for (Axis& a : axes) {
-        if (!a.torque || a.command == a.target) continue;
-        float max_step = a.speed * kStepMs / 1000.0f;
+        if (!a.torque || a.command == a.target) {
+            a.vel = 0;
+            continue;
+        }
+        // Starts at min_speed, accelerates to speed, decelerates back to min_speed at the target, stops.
+        // A target change mid-move is followed from the current velocity (braking first if moving away).
+        constexpr float dt = kStepMs / 1000.0f;
+        float vmax = a.speed < kMaxSpeed ? a.speed : kMaxSpeed;
+        float vmin = a.min_speed < vmax ? a.min_speed : vmax;
         float diff = a.target - a.command;
-        a.command += fabsf(diff) <= max_step ? diff : (diff > 0 ? max_step : -max_step);
+        float dir = diff > 0 ? 1.0f : -1.0f;
+        float dist = fabsf(diff);
+        float v = a.vel * dir;  // speed toward the target (negative = moving away)
+        float max_dv = kAccel * dt;
+        if (v < -vmin) {
+            v += max_dv;  // moving away fast: brake first
+        } else {
+            if (v < vmin) v = vmin;
+            float want = fminf(vmax, sqrtf(vmin * vmin + 2 * kAccel * dist));
+            float dv = want - v;
+            v += fabsf(dv) <= max_dv ? dv : (dv > 0 ? max_dv : -max_dv);
+            if (v < vmin) v = vmin;
+        }
+        a.vel = v * dir;
+        if (v > 0 && v * dt >= dist) {
+            a.command = a.target;  // arrives this step
+            a.vel = 0;
+        } else {
+            a.command += a.vel * dt;
+        }
         if (!writePosition(a, a.command)) {
             ESP_LOGW(TAG, "%s write failed", a.name);
         }
@@ -283,38 +339,111 @@ cJSON* get(const cJSON*, rpc::Error* err) {
     return obj;
 }
 
-cJSON* power(const cJSON* params, rpc::Error* err) {
-    bool on = false;
-    if (!ready) return rpc::fail(err, rpc::kNotAvailable, "servo not available");
-    if (!rpc::getBool(params, "on", &on, err)) return nullptr;
-    if (!on) {
-        powerOff();
-        return cJSON_CreateObject();
+// Powers on and holds the current position. Called with power_mutex held.
+bool powerOnLocked(rpc::Error* err) {
+    if (powered) {
+        return true;  // already on and holding
+    }
+    // Turning VM_EN back on right after cutting it left the servos half-reset: they reported a
+    // bogus position, and holding it slammed both axes to their mechanical ends. Wait for a full reset.
+    if (vm_off_ms != 0) {
+        int64_t off_for = esp_timer_get_time() / 1000 - vm_off_ms;
+        if (off_for < kVmOffMinMs) vTaskDelay(pdMS_TO_TICKS(kVmOffMinMs - off_for));
     }
     setVmEnable(true);
-    vTaskDelay(pdMS_TO_TICKS(100));
-    // Hold the current position: goal = present position, then torque on
-    for (Axis& a : axes) {
-        Feedback f;
-        if (!readFeedback(a, &f)) {
-            powerOff();
-            return rpc::fail(err, rpc::kHardwareError, "servo not responding");
+    // The servos answer only after booting, 0.3-1 s after VM_EN (measured). Trust the position only
+    // after several consecutive, consistent and plausible readings of both axes.
+    Feedback fb[2], prev[2];
+    int stable = 0;
+    const int64_t deadline = esp_timer_get_time() + kBootTimeoutMs * 1000LL;
+    while (stable < kStableReads && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        bool ok = true;
+        for (int i = 0; i < 2 && ok; i++) {
+            ok = readFeedback(axes[i], &fb[i]) && fb[i].volt_mv >= 4000 && fb[i].temp_c > 0 && fb[i].temp_c < 100;
         }
+        bool same = ok && stable > 0 && fabsf(fb[0].angle - prev[0].angle) <= kStableDeg &&
+                    fabsf(fb[1].angle - prev[1].angle) <= kStableDeg;
+        stable = !ok ? 0 : (same ? stable + 1 : 1);
+        if (ok) {
+            prev[0] = fb[0];
+            prev[1] = fb[1];
+        }
+    }
+    if (stable < kStableReads) {
+        powerOff();
+        rpc::fail(err, rpc::kHardwareError, "servo not responding");
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (fb[i].angle < axes[i].min_deg - kPowerOnMarginDeg || fb[i].angle > axes[i].max_deg + kPowerOnMarginDeg) {
+            ESP_LOGW(TAG, "%s reads %.1f deg, outside the limits; not powering on", axes[i].name, fb[i].angle);
+            powerOff();
+            rpc::fail(err, rpc::kHardwareError, "servo position reading out of range");
+            return false;
+        }
+    }
+    // Hold the current position: goal = present position, then torque on
+    for (int i = 0; i < 2; i++) {
+        Axis& a = axes[i];
+        const Feedback& f = fb[i];
         float hold = f.angle < a.min_deg ? a.min_deg : (f.angle > a.max_deg ? a.max_deg : f.angle);
         xSemaphoreTake(mutex, portMAX_DELAY);
         a.command = a.target = hold;
+        a.speed = a.min_speed = kGentleSpeed;  // gentle when easing back inside the limits
         a.overload_count = 0;
         a.stall_since = 0;
         writePosition(a, f.angle);  // exact present position, no jump
         a.command = f.angle;        // then step toward the clamped hold angle
+        a.vel = 0;
         a.torque = setTorque(a, true);
         xSemaphoreGive(mutex);
     }
     powered = true;
-    return cJSON_CreateObject();
+    return true;
 }
 
-bool moveTo(float yaw, float pitch, bool has_yaw, bool has_pitch, float speed, rpc::Error* err) {
+cJSON* power(const cJSON* params, rpc::Error* err) {
+    bool on = false;
+    if (!ready) return rpc::fail(err, rpc::kNotAvailable, "servo not available");
+    if (!rpc::getBool(params, "on", &on, err)) return nullptr;
+    wanted = on;
+    auto_failed = false;
+    xSemaphoreTake(power_mutex, portMAX_DELAY);
+    bool ok = true;
+    if (on) {
+        ok = powerOnLocked(err);
+    } else {
+        powerOff();
+    }
+    xSemaphoreGive(power_mutex);
+    return ok ? cJSON_CreateObject() : nullptr;
+}
+
+void autoTask(void*) {
+    vTaskDelay(pdMS_TO_TICKS(kAutoBootDelayMs));
+    while (true) {
+        bool want = wanted && !idle_off;
+        xSemaphoreTake(power_mutex, portMAX_DELAY);
+        if (want && !powered && !auto_failed) {
+            ESP_LOGI(TAG, "auto power on");
+            rpc::Error err;
+            if (!powerOnLocked(&err)) {
+                auto_failed = true;
+                ESP_LOGW(TAG, "auto power on failed: %s", err.message ? err.message : "?");
+                events::error("servo_power", err.message ? err.message : "power on failed");
+            }
+        } else if (!want && powered) {
+            ESP_LOGI(TAG, "auto power off (%s)", idle_off ? "idle" : "not wanted");
+            powerOff();
+        }
+        xSemaphoreGive(power_mutex);
+        vTaskDelay(pdMS_TO_TICKS(kAutoPeriodMs));
+    }
+}
+
+
+bool moveTo(float yaw, float pitch, bool has_yaw, bool has_pitch, float min_speed, float speed, rpc::Error* err) {
     if (!ready) {
         rpc::fail(err, rpc::kNotAvailable, "servo not available");
         return false;
@@ -327,34 +456,44 @@ bool moveTo(float yaw, float pitch, bool has_yaw, bool has_pitch, float speed, r
     if (has_yaw) {
         axes[0].target = yaw;
         axes[0].speed = speed;
+        axes[0].min_speed = min_speed;
     }
     if (has_pitch) {
         axes[1].target = pitch;
         axes[1].speed = speed;
+        axes[1].min_speed = min_speed;
     }
     xSemaphoreGive(mutex);
     return true;
 }
 
 cJSON* move(const cJSON* params, rpc::Error* err) {
-    double yaw = 0, pitch = 0, speed = kDefaultSpeed;
+    double yaw = 0, pitch = 0, speed = kDefaultMaxSpeed, min_speed = kDefaultMinSpeed;
     bool has_yaw = params && cJSON_GetObjectItemCaseSensitive(params, "yaw");
     bool has_pitch = params && cJSON_GetObjectItemCaseSensitive(params, "pitch");
     if (!has_yaw && !has_pitch) return rpc::fail(err, rpc::kInvalidParams, "yaw and/or pitch required");
     if (!rpc::getOptNumber(params, "yaw", axes[0].min_deg, axes[0].max_deg, &yaw, err) ||
         !rpc::getOptNumber(params, "pitch", axes[1].min_deg, axes[1].max_deg, &pitch, err) ||
-        !rpc::getOptNumber(params, "speed", 1, 360, &speed, err)) {
+        !rpc::getOptNumber(params, "speed", kMinSpeed, kMaxSpeed, &speed, err) ||
+        !rpc::getOptNumber(params, "min_speed", kMinSpeed, kMaxSpeed, &min_speed, err)) {
         return nullptr;
     }
-    if (!moveTo(static_cast<float>(yaw), static_cast<float>(pitch), has_yaw, has_pitch, static_cast<float>(speed),
-                err)) {
+    if (!moveTo(static_cast<float>(yaw), static_cast<float>(pitch), has_yaw, has_pitch,
+                static_cast<float>(min_speed), static_cast<float>(speed), err)) {
         return nullptr;
     }
     return cJSON_CreateObject();
 }
 
-cJSON* home(const cJSON*, rpc::Error* err) {
-    if (!moveTo(0, axes[1].min_deg, true, true, kDefaultSpeed, err)) return nullptr;
+cJSON* home(const cJSON* params, rpc::Error* err) {
+    double speed = kDefaultMaxSpeed, min_speed = kDefaultMinSpeed;
+    if (!rpc::getOptNumber(params, "speed", kMinSpeed, kMaxSpeed, &speed, err) ||
+        !rpc::getOptNumber(params, "min_speed", kMinSpeed, kMaxSpeed, &min_speed, err)) {
+        return nullptr;
+    }
+    if (!moveTo(0, axes[1].min_deg, true, true, static_cast<float>(min_speed), static_cast<float>(speed), err)) {
+        return nullptr;
+    }
     return cJSON_CreateObject();
 }
 
@@ -393,6 +532,7 @@ void loadZeroPositions() {
 void init() {
     bus_mutex = xSemaphoreCreateMutex();
     mutex = xSemaphoreCreateMutex();
+    power_mutex = xSemaphoreCreateMutex();
     loadZeroPositions();
     ESP_LOGI(TAG, "zero positions: yaw %d, pitch %d", axes[0].zero, axes[1].zero);
 
@@ -427,6 +567,38 @@ void start() {
     poller::add("servo.step", step, kStepMs);
     poller::add("servo.monitor", monitor, 100);
     streams::add("servo", servoSource);
+    xTaskCreate(autoTask, "servo.auto", 4096, nullptr, 4, nullptr);
+}
+
+void setIdleOff(bool off) {
+    idle_off = off;
+}
+
+void reactLift(bool on) {
+    if (!ready) return;
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    Axis& p = axes[1];
+    if (on && !lifted && powered && p.torque) {
+        lift_base = p.target;
+        lift_to = p.target + kLiftDeg > p.max_deg ? p.max_deg : p.target + kLiftDeg;
+        p.target = lift_to;
+        p.speed = p.min_speed = kGentleSpeed;
+        lifted = true;
+    } else if (!on && lifted) {
+        if (powered && p.torque && p.target == lift_to) {
+            p.target = lift_base;
+            p.speed = p.min_speed = kGentleSpeed;
+        }
+        lifted = false;
+    }
+    xSemaphoreGive(mutex);
+}
+
+bool moving() {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    bool m = axes[0].command != axes[0].target || axes[1].command != axes[1].target;
+    xSemaphoreGive(mutex);
+    return m;
 }
 
 }  // namespace servo

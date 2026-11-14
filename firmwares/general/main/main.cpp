@@ -7,6 +7,7 @@
 #include "display.h"
 #include "events.h"
 #include "i2c_bus.h"
+#include "idle.h"
 #include "imu.h"
 #include "led.h"
 #include "light.h"
@@ -16,6 +17,7 @@
 #include "notify.h"
 #include "poller.h"
 #include "power.h"
+#include "react.h"
 #include "rpc.h"
 #include "rtc.h"
 #include "servo.h"
@@ -56,6 +58,7 @@ extern "C" void app_main() {
     audio::registerMethods();
     camera::registerMethods();
     servo::registerMethods();
+    idle::registerMethods();
     registerDebugMethods();
 
     // Background polling and streams (all sources registered before poller::start)
@@ -67,6 +70,8 @@ extern "C" void app_main() {
     led::start();
     audio::start();
     servo::start();
+    idle::start();
+    react::start();
     poller::start();
     display::start();
 

@@ -7,5 +7,7 @@ void init();
 void registerMethods();
 // Registers polling. Call after init().
 void start();
+// True while any head zone is touched
+bool headTouched();
 
 }  // namespace touch

@@ -1,5 +1,7 @@
 #include "led.h"
 
+#include <atomic>
+#include <cmath>
 #include <cstring>
 
 #include "esp_log.h"
@@ -49,6 +51,33 @@ Fade fades[kCount];
 int brightness = 100;
 bool dirty = true;
 
+// Effects run in tick(); any set_* call stops them
+enum class Effect { None, Rainbow };
+Effect effect = Effect::None;
+uint32_t effect_period_ms = 3000;
+int64_t effect_start_ms = 0;
+int64_t effect_last_ms = 0;
+constexpr int kEffectFrameMs = 40;
+
+std::atomic<bool> power_save{false};
+bool ps_active = false;  // tick's view (mutex held)
+bool ps_led_on = false;
+constexpr int kPowerSaveBlinkMs = 2000;
+constexpr Rgb kPowerSaveColor = {51, 0, 0};  // red at 20 %, written as is
+
+Rgb hsv(float h) {  // full saturation and value, h in degrees
+    h = fmodf(h, 360.0f);
+    float x = 1 - fabsf(fmodf(h / 60.0f, 2) - 1);
+    float r = 0, g = 0, b = 0;
+    if (h < 60) { r = 1; g = x; }
+    else if (h < 120) { r = x; g = 1; }
+    else if (h < 180) { g = 1; b = x; }
+    else if (h < 240) { g = x; b = 1; }
+    else if (h < 300) { r = x; b = 1; }
+    else { r = 1; b = x; }
+    return {static_cast<uint8_t>(r * 255), static_cast<uint8_t>(g * 255), static_cast<uint8_t>(b * 255)};
+}
+
 int64_t nowMs() {
     return esp_timer_get_time() / 1000;
 }
@@ -73,7 +102,22 @@ void flush() {
     }
 }
 
+// Power save frame: LED 0 only (called with mutex held)
+void flushPowerSave(bool on) {
+    uint8_t ram[kCount * 2] = {};
+    if (on) {
+        uint16_t c = static_cast<uint16_t>(((kPowerSaveColor.r & 0xF8) << 8) | ((kPowerSaveColor.g & 0xFC) << 3) |
+                                           (kPowerSaveColor.b >> 3));
+        ram[0] = static_cast<uint8_t>(c & 0xFF);
+        ram[1] = static_cast<uint8_t>(c >> 8);
+    }
+    if (py32.write(kLedRam, ram, sizeof(ram)) == ESP_OK) {
+        py32.write8(kLedConfig, kCount | (1 << 6));
+    }
+}
+
 void setLed(int i, Rgb c, uint32_t fade_ms) {
+    effect = Effect::None;
     if (fade_ms == 0) {
         shown[i] = c;
         fades[i].duration_ms = 0;
@@ -87,6 +131,30 @@ void setLed(int i, Rgb c, uint32_t fade_ms) {
 void tick() {
     xSemaphoreTake(mutex, portMAX_DELAY);
     int64_t now = nowMs();
+    if (power_save) {
+        bool on = (now / kPowerSaveBlinkMs) % 2 == 0;
+        if (!ps_active || on != ps_led_on) {
+            flushPowerSave(on);
+            ps_active = true;
+            ps_led_on = on;
+        }
+        xSemaphoreGive(mutex);
+        return;
+    }
+    if (ps_active) {
+        ps_active = false;
+        dirty = true;  // restore the normal colors
+    }
+    if (effect == Effect::Rainbow && now - effect_last_ms >= kEffectFrameMs) {
+        // Hue gradient around the 12 LEDs, rotating once per period
+        effect_last_ms = now;
+        float phase = 360.0f * static_cast<float>((now - effect_start_ms) % effect_period_ms) / effect_period_ms;
+        for (int i = 0; i < kCount; i++) {
+            shown[i] = target[i] = hsv(phase + i * 360.0f / kCount);
+            fades[i].duration_ms = 0;
+        }
+        dirty = true;
+    }
     for (int i = 0; i < kCount; i++) {
         Fade& f = fades[i];
         if (f.duration_ms == 0) {
@@ -143,6 +211,7 @@ cJSON* get(const cJSON*, rpc::Error* err) {
         cJSON_AddItemToArray(colors, cJSON_CreateIntArray(rgb, 3));
     }
     cJSON_AddNumberToObject(obj, "brightness", brightness);
+    cJSON_AddStringToObject(obj, "effect", effect == Effect::Rainbow ? "rainbow" : "none");
     xSemaphoreGive(mutex);
     return obj;
 }
@@ -201,8 +270,31 @@ cJSON* setBrightness(const cJSON* params, rpc::Error* err) {
     return cJSON_CreateObject();
 }
 
+cJSON* setEffect(const cJSON* params, rpc::Error* err) {
+    int period = 3000;
+    if (!ready) return notReady(err);
+    const char* name = rpc::getString(params, "name", err);
+    if (name == nullptr || !rpc::getOptInt(params, "period_ms", 500, 60000, &period, err)) return nullptr;
+    Effect e;
+    if (strcmp(name, "none") == 0) {
+        e = Effect::None;
+    } else if (strcmp(name, "rainbow") == 0) {
+        e = Effect::Rainbow;
+    } else {
+        return rpc::fail(err, rpc::kInvalidParams, "name: none / rainbow");
+    }
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    effect = e;
+    effect_period_ms = static_cast<uint32_t>(period);
+    effect_start_ms = nowMs();
+    effect_last_ms = 0;
+    xSemaphoreGive(mutex);
+    return cJSON_CreateObject();
+}
+
 const rpc::Method kMethods[] = {
     {"led.get", get, nullptr},
+    {"led.set_effect", setEffect, nullptr},
     {"led.set_all", setAll, nullptr},
     {"led.set_side", setSide, nullptr},
     {"led.set_one", setOne, nullptr},
@@ -239,6 +331,10 @@ void init() {
 
 void registerMethods() {
     rpc::registerMethods(kMethods, sizeof(kMethods) / sizeof(kMethods[0]));
+}
+
+void setPowerSave(bool on) {
+    power_save = on;
 }
 
 void start() {

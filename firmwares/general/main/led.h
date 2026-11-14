@@ -7,5 +7,7 @@ namespace led {
 void init();
 void registerMethods();
 void start();
+// Idle power save: all LEDs off except LED 0 blinking red (20 %, 2 s on / 2 s off); clearing restores the LEDs.
+void setPowerSave(bool on);
 
 }  // namespace led

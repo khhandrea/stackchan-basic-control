@@ -25,6 +25,9 @@ constexpr int kDefaultBrightness = 128;  // 0-255
 
 std::atomic<int> brightness{kDefaultBrightness};
 std::atomic<bool> powered{true};
+std::atomic<bool> idle_dim{false};
+std::atomic<bool> idle_off{false};
+constexpr int kIdleDimBrightness = 64;
 bool ready = false;
 
 // display.capture: the display task copies the next frame into capture_buf
@@ -33,7 +36,8 @@ uint16_t* capture_buf = nullptr;
 SemaphoreHandle_t capture_done = nullptr;
 
 void applyBacklight() {
-    int value = powered ? brightness.load() : 0;
+    int value = powered && !idle_off ? brightness.load() : 0;
+    if (idle_dim && value > kIdleDimBrightness) value = kIdleDimBrightness;
     power::setBacklight(value == 0 ? 0 : (value * 100 + 254) / 255);
 }
 
@@ -64,7 +68,7 @@ void run(void*) {
     bool panel_on = false;
     while (true) {
         int64_t now = esp_timer_get_time() / 1000;
-        bool want_on = powered;
+        bool want_on = powered && !idle_off;
         if (want_on) {
             renderFrame(now);
             if (!panel_on) {
@@ -160,6 +164,15 @@ void registerMethods() {
     face::registerMethods();
     modal::registerMethods();
     rpc::registerMethods(kMethods, sizeof(kMethods) / sizeof(kMethods[0]));
+}
+
+void setIdleDim(bool on) {
+    idle_dim = on;
+    if (ready) applyBacklight();
+}
+
+void setIdlePowerSave(bool on) {
+    idle_off = on;  // the display task turns the panel off / on before its next frame
 }
 
 void start() {

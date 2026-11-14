@@ -4,7 +4,7 @@ idf_component_register(
         "i2c_bus.cpp" "board.cpp" "power.cpp"
         "lcd.cpp" "gfx.cpp" "face.cpp" "modal.cpp" "display.cpp" "touch.cpp"
         "imu.cpp" "light.cpp" "rtc.cpp" "led.cpp" "audio.cpp" "camera.cpp" "servo.cpp" "drivers/bmi270_config.c"
-        "methods_sys.cpp" "methods_debug.cpp"
+        "methods_sys.cpp" "methods_debug.cpp" "idle.cpp" "react.cpp"
     INCLUDE_DIRS "."
     EMBED_FILES "assets/font16.fnt"
     REQUIRES

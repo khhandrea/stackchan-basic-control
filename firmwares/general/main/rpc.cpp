@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "idle.h"
 #include "link.h"
 #include "notify.h"
 
@@ -70,6 +71,7 @@ void handleLine(const char* line) {
             sendError(id, kMethodNotFound, "method not found");
         }
     } else {
+        idle::onRequest(m->name);  // wakes the device before a state-changing method runs
         Error err;
         cJSON* result = m->handler(params, &err);
         if (id != nullptr) {

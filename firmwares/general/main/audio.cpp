@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 
 #include "driver/i2s_std.h"
 #include "driver/i2s_tdm.h"
@@ -29,13 +30,28 @@ constexpr gpio_num_t kWs = GPIO_NUM_33;
 constexpr gpio_num_t kBclk = GPIO_NUM_34;
 constexpr gpio_num_t kDout = GPIO_NUM_13;  // to AW88298
 constexpr gpio_num_t kDin = GPIO_NUM_14;   // from ES7210
-constexpr int kDefaultVolume = 60;
+constexpr int kDefaultVolume = 45;
 constexpr float kMicGainDb = 30;
+
+enum class Wave { Sine, Square, Triangle, Ramp };
+constexpr const char* kWaveNames[] = {"sine", "square", "triangle", "ramp"};
+constexpr int kDefaultBeepMs = 250;
 
 struct Beep {
     int freq_hz;
     int duration_ms;
+    Wave wave;
 };
+
+// One period sample at phase p (0 .. 1), roughly equal loudness across waves
+float waveSample(Wave w, float p) {
+    switch (w) {
+        case Wave::Square: return (p < 0.5f ? 1.0f : -1.0f) * 0.55f;
+        case Wave::Triangle: return (p < 0.5f ? 4 * p - 1 : 3 - 4 * p);
+        case Wave::Ramp: return (2 * p - 1) * 0.75f;
+        default: return sinf(2 * 3.14159265f * p);
+    }
+}
 
 i2s_chan_handle_t tx = nullptr;
 i2s_chan_handle_t rx = nullptr;
@@ -136,7 +152,7 @@ bool createCodecs() {
 void playBeep(const Beep& b, int16_t* buf) {
     const int total = kSampleRate * b.duration_ms / 1000;
     const int ramp = kSampleRate * 5 / 1000;  // 5 ms fade in / out
-    const float step = 2 * 3.14159265f * b.freq_hz / kSampleRate;
+    const float step = static_cast<float>(b.freq_hz) / kSampleRate;  // phase in periods
     float phase = 0;
     for (int done = 0; done < total;) {
         int n = total - done < kChunkFrames ? total - done : kChunkFrames;
@@ -145,9 +161,9 @@ void playBeep(const Beep& b, int16_t* buf) {
             float env = 1;
             if (k < ramp) env = static_cast<float>(k) / ramp;
             if (total - k < ramp) env = static_cast<float>(total - k) / ramp;
-            buf[i] = static_cast<int16_t>(sinf(phase) * env * 16000);
+            buf[i] = static_cast<int16_t>(waveSample(b.wave, phase) * env * 16000);
             phase += step;
-            if (phase > 2 * 3.14159265f) phase -= 2 * 3.14159265f;
+            if (phase >= 1) phase -= 1;
         }
         esp_codec_dev_write(speaker, buf, n * sizeof(int16_t));
         done += n;
@@ -216,13 +232,23 @@ cJSON* setVolume(const cJSON* params, rpc::Error* err) {
 }
 
 cJSON* beep(const cJSON* params, rpc::Error* err) {
-    int freq = 0, duration = 0;
+    int freq = 0, duration = kDefaultBeepMs;
     if (speaker == nullptr) return rpc::fail(err, rpc::kNotAvailable, "audio not available");
     if (!rpc::getInt(params, "freq_hz", 20, 12000, &freq, err) ||
-        !rpc::getInt(params, "duration_ms", 1, 1000, &duration, err)) {
+        !rpc::getOptInt(params, "duration_ms", 1, 1000, &duration, err)) {
         return nullptr;
     }
-    Beep b = {freq, duration};
+    bool ok = true;
+    const char* wave_name = rpc::getOptString(params, "wave", err, &ok);
+    if (!ok) return nullptr;
+    Wave wave = Wave::Ramp;
+    if (wave_name != nullptr) {
+        int i = 0;
+        while (i < 4 && strcmp(kWaveNames[i], wave_name) != 0) i++;
+        if (i == 4) return rpc::fail(err, rpc::kInvalidParams, "wave: sine / square / triangle / ramp");
+        wave = static_cast<Wave>(i);
+    }
+    Beep b = {freq, duration, wave};
     if (xQueueSend(beeps, &b, 0) != pdTRUE) {
         return rpc::fail(err, rpc::kBusy, "beep queue full");
     }

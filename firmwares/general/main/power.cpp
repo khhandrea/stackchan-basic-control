@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "events.h"
 #include "i2c_bus.h"
+#include "idle.h"
 #include "link.h"
 #include "poller.h"
 #include "rpc.h"
@@ -29,6 +30,7 @@ constexpr uint8_t kVbat = 0x34;          // 14-bit mV, then TS, VBUS, VSYS, die 
 constexpr uint8_t kLdoEnable = 0x90;     // bit7 DLDO1 (LCD backlight)
 constexpr uint8_t kDldo1Voltage = 0x99;
 constexpr uint8_t kChargeCurrent = 0x62;
+constexpr uint8_t kChargeCtrl = 0x18;       // bit1 cell battery charge enable
 constexpr uint8_t kBatteryPercent = 0xA4;
 
 constexpr uint8_t kPkeyShortPress = 1 << 3;
@@ -38,6 +40,11 @@ constexpr uint8_t kPkeyPositiveEdge = 1 << 0;
 // ---- INA226 (battery, 10 mOhm shunt) ----
 constexpr uint8_t kInaConfig = 0x00;
 constexpr uint8_t kInaShunt = 0x01;  // signed, 2.5 uV/LSB → 0.25 mA/LSB with 10 mOhm
+
+// Storage charge mode (default): on USB, charge only below 40 % and stop at 60 %, so an always-plugged
+// battery does not sit full and warm. Full mode: the charger runs normally (4.2 V).
+constexpr int kStorageLowPct = 40;
+constexpr int kStorageHighPct = 60;
 
 constexpr int kLowBatteryPct = 10;
 constexpr int kLowBatteryClearPct = 15;
@@ -55,9 +62,11 @@ struct State {
 } state;
 
 std::atomic<bool> button_pressed{false};
-std::atomic<uint32_t> button_count{0};
+std::atomic<bool> button_poked{false};  // pressed since the last takeButtonPress()
 std::atomic<int64_t> button_last_ms{0};
 std::atomic<uint32_t> power_log_interval_s{0};
+std::atomic<bool> full_charge{false};
+bool charger_on = true;  // last value written to the charger enable bit
 int64_t power_log_next_ms = 0;
 
 int64_t nowMs() {
@@ -133,6 +142,9 @@ void addStatusFields(cJSON* obj, const Reading& r) {
     cJSON_AddNumberToObject(obj, "chip_temp_c", static_cast<int>(r.chip_temp_c * 10) / 10.0);
     cJSON_AddNumberToObject(obj, "pmic_temp_c", static_cast<int>(r.pmic_temp_c * 10) / 10.0);
     cJSON_AddNumberToObject(obj, "free_heap", esp_get_free_heap_size());
+    cJSON_AddStringToObject(obj, "charge_mode", full_charge ? "full" : "storage");
+    cJSON_AddBoolToObject(obj, "charger_on", charger_on);
+    idle::addStatus(obj);
 }
 
 bool statusSource(cJSON* obj) {
@@ -164,12 +176,13 @@ void pollButton() {
     axp.write8(kIrqStatus2, pkey);  // write 1 to clear
     if (pkey & kPkeyNegativeEdge) {
         button_pressed = true;
+        button_poked = true;
+        idle::activity();
     }
     if (pkey & kPkeyPositiveEdge) {
         button_pressed = false;
     }
     if (pkey & kPkeyShortPress) {
-        button_count++;
         button_last_ms = nowMs();
         cJSON* f = cJSON_CreateObject();
         cJSON_AddStringToObject(f, "kind", "press");
@@ -177,11 +190,31 @@ void pollButton() {
     }
 }
 
+void setCharger(bool on) {
+    if (axp.update8(kChargeCtrl, 0x02, on ? 0x02 : 0x00) == ESP_OK) {
+        charger_on = on;
+        ESP_LOGI(TAG, "charger %s", on ? "on" : "off");
+    }
+}
+
+void applyChargePolicy(const Reading& r) {
+    bool want = charger_on;
+    if (full_charge || !r.vbus || r.batt_pct < 0) {
+        want = true;  // full mode, or nothing to manage without USB / gauge
+    } else if (r.batt_pct < kStorageLowPct) {
+        want = true;
+    } else if (r.batt_pct >= kStorageHighPct) {
+        want = false;
+    }
+    if (want != charger_on) setCharger(want);
+}
+
 void pollPower() {
     Reading r;
     if (!read(&r)) {
         return;
     }
+    applyChargePolicy(r);
     if (r.vbus != state.vbus) {
         state.vbus = r.vbus;
         cJSON* f = cJSON_CreateObject();
@@ -239,11 +272,28 @@ cJSON* powerOff(const cJSON*, rpc::Error* err) {
     return cJSON_CreateObject();
 }
 
+bool buttonSource(cJSON* obj) {
+    cJSON_AddBoolToObject(obj, "pressed", button_pressed.load());
+    cJSON_AddNumberToObject(obj, "last_ms", static_cast<double>(button_last_ms.load()));
+    return true;
+}
+
+cJSON* setChargeMode(const cJSON* params, rpc::Error* err) {
+    const char* mode = rpc::getString(params, "mode", err);
+    if (mode == nullptr) return nullptr;
+    if (strcmp(mode, "full") == 0) {
+        full_charge = true;
+    } else if (strcmp(mode, "storage") == 0) {
+        full_charge = false;
+    } else {
+        return rpc::fail(err, rpc::kInvalidParams, "mode: storage / full");
+    }
+    return cJSON_CreateObject();
+}
+
 cJSON* buttonGet(const cJSON*, rpc::Error*) {
     cJSON* obj = cJSON_CreateObject();
-    cJSON_AddBoolToObject(obj, "pressed", button_pressed.load());
-    cJSON_AddNumberToObject(obj, "count", button_count.load());
-    cJSON_AddNumberToObject(obj, "last_ms", static_cast<double>(button_last_ms.load()));
+    buttonSource(obj);
     return obj;
 }
 
@@ -279,6 +329,7 @@ cJSON* setPowerInterval(const cJSON* params, rpc::Error* err) {
 const rpc::Method kMethods[] = {
     {"sys.status", status, nullptr},
     {"sys.power_off", powerOff, powerOffNow},
+    {"power.set_charge_mode", setChargeMode, nullptr},
     {"button.get", buttonGet, nullptr},
     {"log.set_level", setLogLevel, nullptr},
     {"log.set_power_interval", setPowerInterval, nullptr},
@@ -304,6 +355,10 @@ void initAxp2101() {
 
 }  // namespace
 
+bool takeButtonPress() {
+    return button_poked.exchange(false);
+}
+
 void setBacklight(int percent) {
     if (!axp.isOpen()) {
         return;
@@ -327,6 +382,10 @@ void init() {
         if (read(&r)) {
             state.vbus = r.vbus;
             state.charging = r.charging;
+        }
+        uint8_t ctrl = 0;
+        if (axp.read8(kChargeCtrl, &ctrl) == ESP_OK) {
+            charger_on = ctrl & 0x02;
         }
     } else {
         ESP_LOGE(TAG, "AXP2101 not found");
@@ -360,6 +419,7 @@ void start() {
     poller::add("button", pollButton, 20);
     poller::add("power", pollPower, 200);
     streams::add("status", statusSource);
+    streams::add("button", buttonSource);
 }
 
 }  // namespace power

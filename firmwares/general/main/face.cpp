@@ -1,5 +1,6 @@
 #include "face.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
@@ -11,37 +12,48 @@
 namespace face {
 namespace {
 
-enum Expression { Neutral, Happy, Angry, Sad, Doubt, Sleepy, kExpressionCount };
-constexpr const char* kExpressionNames[] = {"neutral", "happy", "angry", "sad", "doubt", "sleepy"};
+enum Expression { Neutral, Happy, Unhappy, Angry, Sad, Sleepy, kExpressionCount };
+constexpr const char* kExpressionNames[] = {"neutral", "happy", "unhappy", "angry", "sad", "sleepy"};
 
-enum Decorator { Heart, AngryMark, Sweat, Dizzy, Shy, kDecoratorCount };
-constexpr const char* kDecoratorNames[] = {"heart", "angry", "sweat", "dizzy", "shy"};
+enum Decorator { Heart, AngryMark, Sweat, Shy, Question, kDecoratorCount };
+constexpr const char* kDecoratorNames[] = {"heart", "angry", "sweat", "shy", "question"};
 
 struct Params {
     float eye_x = 0;      // gaze -1 (left) .. 1 (right)
     float eye_y = 0;      // gaze -1 (up) .. 1 (down)
-    float eye_open = 1;   // 0 .. 1
-    float eye_rot = 0;    // degrees
-    float eye_size = 1;   // 0.5 .. 1.5
-    float mouth_open = 0; // 0 .. 1
-    float mouth_rot = 0;  // degrees
+    float eye_open = 1;      // 0 .. 1
+    float mouth_open = 0;    // 0 .. 1
+    float mouth_rot = 0;     // degrees
+    float mouth_size = 0.5;  // width scale 0.25 .. 2
 };
+
+constexpr float kEyeSize = 0.5;     // x kEyeRadius
+constexpr float kMouthThick = 3.5;  // closed mouth / smile line thickness, px
 
 struct State {
     Expression expression = Neutral;
     Params params;
     bool decorators[kDecoratorCount] = {};
     bool blink = true;
-    bool breath = true;
+    bool gaze = true;   // random quick glances (saccades), added to eye_x / eye_y
+    bool react = true;  // reactions to touch / shake / motion (react module)
 };
 
 SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
+std::atomic<bool> idle_sleepy{false};
+std::atomic<Reaction> reaction{Reaction::None};
 State state;   // guarded by mutex
 State frame;   // copy used by the display task
 float blink_open = 1;
-float breath_dy = 0;
 int64_t next_blink_ms = 3000;
 int64_t blink_start_ms = -1;
+
+// Auto gaze: hold, then jump quickly to a new random point
+float gaze_x = 0, gaze_y = 0;            // current offset
+float gaze_from_x = 0, gaze_from_y = 0;  // jump start
+float gaze_to_x = 0, gaze_to_y = 0;      // jump target
+int64_t gaze_start_ms = -1;              // jump in progress since
+int64_t next_gaze_ms = 1500;
 
 constexpr uint16_t kBg = gfx::rgb(0, 0, 0);
 constexpr uint16_t kFg = gfx::rgb(255, 255, 255);
@@ -54,7 +66,19 @@ constexpr float kEyeRadius = 16;
 constexpr float kEyeSpacing = 60;  // from the center
 constexpr float kEyeY = 105;
 constexpr float kMouthY = 165;
+constexpr float kPleasedMouthOpen = 0.25f;  // head-touch reaction: smile a little open
 constexpr int kBlinkMs = 180;
+constexpr int kGazeJumpMs = 60;        // saccade duration
+constexpr int kGazeHoldMinMs = 600;    // fixation time
+constexpr int kGazeHoldRangeMs = 2400;
+
+float clampUnit(float v) {
+    return v < -1 ? -1 : (v > 1 ? 1 : v);
+}
+
+float randomUnit() {
+    return (esp_random() % 2001) / 1000.0f - 1.0f;  // -1 .. 1
+}
 
 // Eye lid cut: pixels above the top line / below the bottom line are removed.
 // Lines pass through (cx, cy + offset * r) with the given slope; slope > 0 lowers the inner side.
@@ -64,15 +88,11 @@ struct Lids {
     float top_slope = 0;
     bool bottom = false;
     float bottom_offset = 0;
-    bool crescent = false;  // happy: cut an ellipse below the center, leaving an upper arc
 };
 
 Lids lidsFor(Expression e, bool left) {
     Lids l;
     switch (e) {
-        case Happy:
-            l.crescent = true;
-            break;
         case Angry:
             l.top = true;
             l.top_offset = -0.35f;
@@ -82,12 +102,6 @@ Lids lidsFor(Expression e, bool left) {
             l.top = true;
             l.top_offset = -0.35f;
             l.top_slope = -0.55f;
-            break;
-        case Doubt:
-            if (left) {
-                l.top = true;
-                l.top_offset = 0.0f;
-            }
             break;
         case Sleepy:
             l.top = true;
@@ -101,26 +115,18 @@ Lids lidsFor(Expression e, bool left) {
 
 void drawEye(const gfx::Band& b, const State& s, bool left) {
     const Params& p = s.params;
-    float r = kEyeRadius * p.eye_size;
-    float cx = 160 + (left ? -kEyeSpacing : kEyeSpacing) + p.eye_x * 12;
-    float cy = kEyeY + p.eye_y * 10 + breath_dy;
-
-    if (s.decorators[Dizzy]) {
-        gfx::fillRing(b, cx, cy, r, r * 0.72f, kFg);
-        gfx::fillRing(b, cx, cy, r * 0.48f, r * 0.24f, kFg);
-        return;
-    }
+    float r = kEyeRadius * kEyeSize;
+    float cx = 160 + (left ? -kEyeSpacing : kEyeSpacing) + clampUnit(p.eye_x + gaze_x) * 12;
+    float cy = kEyeY + clampUnit(p.eye_y + gaze_y) * 10;
 
     float open = p.eye_open * blink_open;
     float ry = r * open;
     if (ry < 1.5f) {
         // closed: a short line
-        gfx::fillRoundRect(b, cx, cy, r * 2, 3, 1.5f, left ? p.eye_rot : -p.eye_rot, kFg);
+        gfx::fillRoundRect(b, cx, cy, r * 2, 3, 1.5f, 0, kFg);
         return;
     }
-    float angle = (left ? p.eye_rot : -p.eye_rot) * 3.14159265f / 180.0f;
-    float c = cosf(angle);
-    float sn = sinf(angle);
+    const float c = 1, sn = 0;  // eye rotation (fixed upright)
     Lids lids = lidsFor(s.expression, left);
     float inward = left ? 1.0f : -1.0f;  // +x toward the nose for the left eye
 
@@ -142,53 +148,93 @@ void drawEye(const gfx::Band& b, const State& s, bool left) {
                        if (lids.bottom && dy > lids.bottom_offset * r) {
                            return false;
                        }
-                       if (lids.crescent) {
-                           float cu = dx / (r * 1.05f);
-                           float cv = (dy - r * 0.55f) / (r * 0.95f);
-                           if (cu * cu + cv * cv <= 1.0f) {
-                               return false;
-                           }
-                       }
                        return true;
+                   });
+}
+
+// Smile (curve = 1) or frown (curve = -1): a curved line; when open, a filled "D" below (or above) the chord.
+void drawCurvedMouth(const gfx::Band& b, float w, float open, int curve, float rot_deg) {
+    const float hw = w / 2;
+    const float depth = w * 0.25f;   // sag of the closed curve
+    const float open_h = open * 36;  // extra opening
+    const float t = kMouthThick;
+    const float a = rot_deg * 3.14159265f / 180.0f;
+    const float c = cosf(a), sn = sinf(a);
+    const float cx = 160, cy = kMouthY;
+    const float r = hw + depth + open_h + t;
+    gfx::fillShape(b, static_cast<int>(cx - r), static_cast<int>(cy - r), static_cast<int>(cx + r),
+                   static_cast<int>(cy + r), kFg, [&](float x, float y) {
+                       float dx = x - cx, dy = y - cy;
+                       float u = dx * c + dy * sn;
+                       float v = curve * (-dx * sn + dy * c);  // + = toward the curve's belly
+                       float au = fabsf(u);
+                       if (au > hw) {  // round end caps at (±hw, -depth / 2)
+                           float ex = au - hw, ey = v + depth / 2;
+                           return ex * ex + ey * ey <= t * t / 4;
+                       }
+                       float k = u / hw;
+                       if (open_h > 0.5f) {
+                           float bottom = -depth / 2 + (depth + open_h) * sqrtf(1 - k * k);  // half ellipse
+                           return v >= -depth / 2 - t / 2 && v <= bottom + t / 2;
+                       }
+                       float f = depth * (0.5f - k * k);
+                       float slope = -2 * depth * u / (hw * hw);
+                       return fabsf(v - f) <= t / 2 * sqrtf(1 + slope * slope);
                    });
 }
 
 void drawMouth(const gfx::Band& b, const State& s) {
     const Params& p = s.params;
     float w = 56;
-    float rot = p.mouth_rot;
-    float open = p.mouth_open;
+    int curve = 0;
     switch (s.expression) {
-        case Happy: w = 72; open = open < 0.25f ? 0.25f : open; break;
+        case Happy: w = 64; curve = 1; break;
+        case Unhappy: w = 56; curve = -1; break;
         case Angry: w = 44; break;
         case Sad: w = 40; break;
-        case Doubt: w = 44; rot += 10; break;
         case Sleepy: w = 30; break;
         default: break;
     }
-    float h = 5 + open * 36;
-    gfx::fillRoundRect(b, 160, kMouthY + breath_dy, w, h, h < 10 ? h / 2 : 6, rot, kFg);
+    w *= p.mouth_size;
+    if (curve != 0) {
+        drawCurvedMouth(b, w, p.mouth_open, curve, p.mouth_rot);
+        return;
+    }
+    float h = kMouthThick + p.mouth_open * 36;
+    gfx::fillRoundRect(b, 160, kMouthY, w, h, h < 10 ? h / 2 : 6, p.mouth_rot, kFg);
 }
 
 void drawDecorators(const gfx::Band& b, const State& s) {
-    float dy = breath_dy;
     if (s.decorators[Shy]) {
-        gfx::fillEllipse(b, 160 - kEyeSpacing - 8, kEyeY + 38 + dy, 22, 9, 0, kBlush);
-        gfx::fillEllipse(b, 160 + kEyeSpacing + 8, kEyeY + 38 + dy, 22, 9, 0, kBlush);
+        gfx::fillEllipse(b, 160 - kEyeSpacing - 8, kEyeY + 38, 22, 9, 0, kBlush);
+        gfx::fillEllipse(b, 160 + kEyeSpacing + 8, kEyeY + 38, 22, 9, 0, kBlush);
     }
     if (s.decorators[Heart]) {
-        gfx::fillHeart(b, 270, 45 + dy, 34, kPink);
+        gfx::fillHeart(b, 270, 45, 34, kPink);
     }
     if (s.decorators[AngryMark]) {
         // Four bent strokes around (55, 45), like the comic "vein" mark
         for (int i = 0; i < 4; i++) {
             float a = i * 90.0f + 45.0f;
             float rad = a * 3.14159265f / 180.0f;
-            gfx::fillRoundRect(b, 55 + 11 * cosf(rad), 45 + dy + 11 * sinf(rad), 16, 5, 2.5f, a + 90, kRed);
+            gfx::fillRoundRect(b, 55 + 11 * cosf(rad), 45 + 11 * sinf(rad), 16, 5, 2.5f, a + 90, kRed);
         }
     }
     if (s.decorators[Sweat]) {
-        gfx::fillDrop(b, 262, 80 + dy, 9, kBlue);
+        gfx::fillDrop(b, 262, 80, 9, kBlue);
+    }
+    if (s.decorators[Question]) {
+        // White "?" at the top right: hook (ring without its lower-left quarter), stem, dot
+        const float qx = 272, qy = 38, ro = 13, ri = 8;
+        gfx::fillShape(b, static_cast<int>(qx - ro - 1), static_cast<int>(qy - ro - 1), static_cast<int>(qx + ro + 1),
+                       static_cast<int>(qy + 40), kFg, [&](float x, float y) {
+                           float dx = x - qx, dy = y - qy;
+                           float d2 = dx * dx + dy * dy;
+                           if (d2 <= ro * ro && d2 >= ri * ri && !(dx < 0 && dy > 0)) return true;  // hook
+                           if (fabsf(dx) <= 2.5f && dy >= (ro + ri) / 2 - 2.5f && dy <= ro + 10) return true;  // stem
+                           float ddy = dy - (ro + 18);
+                           return dx * dx + ddy * ddy <= 3.5f * 3.5f;  // dot
+                       });
     }
 }
 
@@ -214,6 +260,38 @@ void updateBlink(int64_t now) {
     }
 }
 
+void updateGaze(int64_t now) {
+    if (!frame.gaze) {
+        gaze_x = gaze_y = 0;
+        gaze_start_ms = -1;
+        return;
+    }
+    if (gaze_start_ms < 0 && now >= next_gaze_ms) {
+        gaze_from_x = gaze_x;
+        gaze_from_y = gaze_y;
+        if (esp_random() % 3 == 0) {
+            gaze_to_x = gaze_to_y = 0;  // look back at the center now and then
+        } else {
+            gaze_to_x = randomUnit();
+            gaze_to_y = randomUnit() * 0.7f;
+        }
+        gaze_start_ms = now;
+    }
+    if (gaze_start_ms >= 0) {
+        float t = static_cast<float>(now - gaze_start_ms) / kGazeJumpMs;
+        if (t >= 1) {
+            gaze_x = gaze_to_x;
+            gaze_y = gaze_to_y;
+            gaze_start_ms = -1;
+            next_gaze_ms = now + kGazeHoldMinMs + esp_random() % kGazeHoldRangeMs;
+        } else {
+            float e = 1 - (1 - t) * (1 - t);  // ease out
+            gaze_x = gaze_from_x + (gaze_to_x - gaze_from_x) * e;
+            gaze_y = gaze_from_y + (gaze_to_y - gaze_from_y) * e;
+        }
+    }
+}
+
 // ---- methods ----
 
 cJSON* stateJson() {
@@ -226,10 +304,9 @@ cJSON* stateJson() {
     cJSON_AddNumberToObject(p, "eye_x", s.params.eye_x);
     cJSON_AddNumberToObject(p, "eye_y", s.params.eye_y);
     cJSON_AddNumberToObject(p, "eye_open", s.params.eye_open);
-    cJSON_AddNumberToObject(p, "eye_rot", s.params.eye_rot);
-    cJSON_AddNumberToObject(p, "eye_size", s.params.eye_size);
     cJSON_AddNumberToObject(p, "mouth_open", s.params.mouth_open);
     cJSON_AddNumberToObject(p, "mouth_rot", s.params.mouth_rot);
+    cJSON_AddNumberToObject(p, "mouth_size", s.params.mouth_size);
     cJSON* d = cJSON_AddArrayToObject(obj, "decorators");
     for (int i = 0; i < kDecoratorCount; i++) {
         if (s.decorators[i]) {
@@ -238,7 +315,8 @@ cJSON* stateJson() {
     }
     cJSON* a = cJSON_AddObjectToObject(obj, "auto");
     cJSON_AddBoolToObject(a, "blink", s.blink);
-    cJSON_AddBoolToObject(a, "breath", s.breath);
+    cJSON_AddBoolToObject(a, "gaze", s.gaze);
+    cJSON_AddBoolToObject(a, "react", s.react);
     return obj;
 }
 
@@ -262,7 +340,7 @@ cJSON* setExpression(const cJSON* params, rpc::Error* err) {
     }
     int e = lookup(name, kExpressionNames, kExpressionCount);
     if (e < 0) {
-        return rpc::fail(err, rpc::kInvalidParams, "name: neutral / happy / angry / sad / doubt / sleepy");
+        return rpc::fail(err, rpc::kInvalidParams, "name: neutral / happy / unhappy / angry / sad / sleepy");
     }
     xSemaphoreTake(mutex, portMAX_DELAY);
     state.expression = static_cast<Expression>(e);
@@ -280,10 +358,9 @@ cJSON* setParams(const cJSON* params, rpc::Error* err) {
         float* target;
         double min, max;
     } fields[] = {
-        {"eye_x", &p.eye_x, -1, 1},          {"eye_y", &p.eye_y, -1, 1},
-        {"eye_open", &p.eye_open, 0, 1},     {"eye_rot", &p.eye_rot, -45, 45},
-        {"eye_size", &p.eye_size, 0.5, 1.5}, {"mouth_open", &p.mouth_open, 0, 1},
-        {"mouth_rot", &p.mouth_rot, -45, 45},
+        {"eye_x", &p.eye_x, -1, 1},           {"eye_y", &p.eye_y, -1, 1},
+        {"eye_open", &p.eye_open, 0, 1},      {"mouth_open", &p.mouth_open, 0, 1},
+        {"mouth_rot", &p.mouth_rot, -45, 45}, {"mouth_size", &p.mouth_size, 0.25, 2},
     };
     for (Field& f : fields) {
         v = *f.target;
@@ -306,7 +383,7 @@ cJSON* setDecorator(const cJSON* params, rpc::Error* err) {
     }
     int d = lookup(name, kDecoratorNames, kDecoratorCount);
     if (d < 0) {
-        return rpc::fail(err, rpc::kInvalidParams, "name: heart / angry / sweat / dizzy / shy");
+        return rpc::fail(err, rpc::kInvalidParams, "name: heart / angry / sweat / shy / question");
     }
     xSemaphoreTake(mutex, portMAX_DELAY);
     state.decorators[d] = on;
@@ -317,14 +394,20 @@ cJSON* setDecorator(const cJSON* params, rpc::Error* err) {
 cJSON* setAuto(const cJSON* params, rpc::Error* err) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     bool blink = state.blink;
-    bool breath = state.breath;
+    bool gaze = state.gaze;
+    bool react = state.react;
     xSemaphoreGive(mutex);
-    if (!rpc::getOptBool(params, "blink", &blink, err) || !rpc::getOptBool(params, "breath", &breath, err)) {
+    bool all = true, has_all = params && cJSON_GetObjectItemCaseSensitive(params, "on");
+    if (!rpc::getOptBool(params, "on", &all, err)) return nullptr;
+    if (has_all) blink = gaze = react = all;  // "on" sets every automatic behavior, then individual keys
+    if (!rpc::getOptBool(params, "blink", &blink, err) || !rpc::getOptBool(params, "gaze", &gaze, err) ||
+        !rpc::getOptBool(params, "react", &react, err)) {
         return nullptr;
     }
     xSemaphoreTake(mutex, portMAX_DELAY);
     state.blink = blink;
-    state.breath = breath;
+    state.gaze = gaze;
+    state.react = react;
     xSemaphoreGive(mutex);
     return cJSON_CreateObject();
 }
@@ -347,8 +430,40 @@ void update(int64_t now_ms) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     frame = state;
     xSemaphoreGive(mutex);
+    switch (reaction.load()) {
+        case Reaction::Pleased:
+            frame.expression = Happy;
+            frame.decorators[Shy] = true;
+            if (frame.params.mouth_open < kPleasedMouthOpen) frame.params.mouth_open = kPleasedMouthOpen;  // half moon
+            break;
+        case Reaction::Upset:
+            frame.expression = Unhappy;
+            frame.decorators[Sweat] = true;
+            break;
+        case Reaction::Curious:
+            frame.expression = Neutral;
+            frame.decorators[Question] = true;
+            break;
+        default:
+            if (idle_sleepy) frame.expression = Sleepy;
+    }
     updateBlink(now_ms);
-    breath_dy = frame.breath ? 3.0f * sinf(2 * 3.14159265f * (now_ms % 4000) / 4000.0f) : 0;
+    updateGaze(now_ms);
+}
+
+void setIdleSleepy(bool on) {
+    idle_sleepy = on;
+}
+
+void setReaction(Reaction r) {
+    reaction = r;
+}
+
+bool reactEnabled() {
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    bool on = state.react;
+    xSemaphoreGive(mutex);
+    return on;
 }
 
 void render(const gfx::Band& b) {
